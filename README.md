@@ -2,14 +2,17 @@
 
 Personal progress tracker learning project.
 
-## First tiny version
+## Current version
 
 - Go backend with `GET /health`
-- Go backend with `GET /entries`
-- Go backend with `POST /entries`
+- Go backend with goals and sessions REST API
+- Go backend with `GET /goals`
+- Go backend with `POST /goals`
+- Go backend with `GET /goals/{id}`
+- Go backend with `POST /goals/{id}/sessions`
 - Go backend with `GET /stats`
 - SQLite database at `backend/data/progress.db`
-- React frontend that checks backend connection
+- React frontend with goals, session timer, finish modal, and statistics
 
 ## Run backend
 
