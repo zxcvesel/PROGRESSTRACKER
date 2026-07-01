@@ -358,6 +358,15 @@
   font-size: 12px;
 }
 
+.goal-progress-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .time-panel p,
 .stat-card p,
 .section-heading span {
@@ -438,6 +447,7 @@
 }
 
 .entry-form label,
+.history-edit-form label,
 .bottom-sheet label {
   display: flex;
   min-width: 0;
@@ -454,8 +464,18 @@
   gap: 10px;
 }
 
+.form-row--single {
+  grid-template-columns: 1fr;
+}
+
+.form-row--target {
+  grid-template-columns: 1fr 1fr;
+}
+
 .entry-form input,
 .entry-form textarea,
+.history-edit-form input,
+.history-edit-form textarea,
 .bottom-sheet input,
 .bottom-sheet textarea {
   width: 100%;
@@ -469,12 +489,15 @@
   font: inherit;
 }
 
-.entry-form textarea {
+.entry-form textarea,
+.history-edit-form textarea {
   resize: vertical;
 }
 
 .entry-form input:focus,
 .entry-form textarea:focus,
+.history-edit-form input:focus,
+.history-edit-form textarea:focus,
 .bottom-sheet input:focus,
 .bottom-sheet textarea:focus {
   border-color: rgba(25, 247, 232, 0.7);
@@ -508,6 +531,32 @@
   background: rgba(255, 255, 255, 0.04);
   font: inherit;
   font-weight: 800;
+}
+
+.compact-button {
+  min-height: 36px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.danger-panel {
+  margin-top: 12px;
+  padding-bottom: 4px;
+}
+
+.danger-button {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(251, 113, 133, 0.3);
+  border-radius: 15px;
+  color: #fecdd3;
+  background: rgba(251, 113, 133, 0.08);
+  font: inherit;
+  font-weight: 850;
+}
+
+.danger-button:active {
+  transform: translateY(1px);
 }
 
 .primary-button:disabled {
@@ -575,6 +624,42 @@
   margin-top: 6px;
   color: var(--text);
   font-size: 13px;
+}
+
+.history-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.history-actions button {
+  min-height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--text-strong);
+  background: rgba(255, 255, 255, 0.04);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.history-actions .history-action--primary {
+  border-color: rgba(25, 247, 232, 0.22);
+  color: var(--accent);
+}
+
+.history-actions .history-action--danger {
+  border-color: rgba(251, 113, 133, 0.28);
+  color: #fecdd3;
 }
 
 .tag-row {
@@ -675,6 +760,47 @@
   margin-bottom: 12px;
   padding: 16px;
   border-radius: 19px;
+}
+
+.dev-speed-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(25, 247, 232, 0.12);
+  border-radius: 14px;
+  background: rgba(25, 247, 232, 0.045);
+}
+
+.dev-speed-panel span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dev-speed-panel div {
+  display: flex;
+  gap: 5px;
+}
+
+.dev-speed-panel button {
+  min-height: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.dev-speed-panel .is-selected {
+  border-color: rgba(25, 247, 232, 0.46);
+  color: #021014;
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(25, 247, 232, 0.18);
 }
 
 .timer-panel p {

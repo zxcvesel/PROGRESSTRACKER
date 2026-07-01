@@ -73,12 +73,25 @@ type CreateGoalRequest struct {
 	StartDate          string `json:"startDate"`
 }
 
+type UpdateGoalRequest struct {
+	Title              string `json:"title"`
+	Description        string `json:"description"`
+	TotalDays          int    `json:"totalDays"`
+	DailyTargetMinutes int    `json:"dailyTargetMinutes"`
+	Status             string `json:"status"`
+}
+
 type CreateSessionRequest struct {
 	StartedAt       string   `json:"startedAt"`
 	EndedAt         string   `json:"endedAt"`
 	DurationMinutes int      `json:"durationMinutes"`
 	Notes           string   `json:"notes"`
 	Tags            []string `json:"tags"`
+}
+
+type UpdateSessionRequest struct {
+	Notes string   `json:"notes"`
+	Tags  []string `json:"tags"`
 }
 
 type Stats struct {
@@ -125,11 +138,20 @@ func main() {
 	mux.HandleFunc("GET /goals", goalsHandler)
 	mux.HandleFunc("POST /goals", createGoalHandler)
 	mux.HandleFunc("GET /goals/{id}", goalDetailHandler)
+	mux.HandleFunc("PATCH /goals/{id}", updateGoalHandler)
+	mux.HandleFunc("DELETE /goals/{id}", deleteGoalHandler)
 	mux.HandleFunc("POST /goals/{id}/sessions", createSessionHandler)
+	mux.HandleFunc("PATCH /goals/{id}/sessions/{sessionId}", updateSessionHandler)
+	mux.HandleFunc("DELETE /goals/{id}/sessions/{sessionId}", deleteSessionHandler)
 	mux.HandleFunc("GET /stats", statsHandler)
 
-	log.Println("Backend is running on http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	port := os.Getenv("PROGRESS_TRACKER_PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("Backend is running on http://localhost:%s", port)
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -370,6 +392,87 @@ func goalDetailHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, detail, http.StatusOK)
 }
 
+func updateGoalHandler(w http.ResponseWriter, r *http.Request) {
+	goal, ok := loadGoalFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	var request UpdateGoalRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if request.Title == "" || request.TotalDays <= 0 || request.DailyTargetMinutes <= 0 {
+		http.Error(w, "title, totalDays, and dailyTargetMinutes are required", http.StatusBadRequest)
+		return
+	}
+
+	if request.Status == "" {
+		request.Status = goal.Status
+	}
+	if request.Status != "active" && request.Status != "completed" {
+		http.Error(w, "status must be active or completed", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec(`
+		UPDATE goals
+		SET title = ?, description = ?, total_days = ?, daily_target_minutes = ?, status = ?
+		WHERE id = ?
+	`, request.Title, request.Description, request.TotalDays, request.DailyTargetMinutes, request.Status, goal.ID)
+	if err != nil {
+		http.Error(w, "failed to update goal", http.StatusInternalServerError)
+		return
+	}
+
+	updatedGoal, err := loadGoal(goal.ID)
+	if err != nil {
+		http.Error(w, "failed to load updated goal", http.StatusInternalServerError)
+		return
+	}
+
+	summary, err := buildGoalSummary(updatedGoal)
+	if err != nil {
+		http.Error(w, "failed to load updated goal summary", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, summary, http.StatusOK)
+}
+
+func deleteGoalHandler(w http.ResponseWriter, r *http.Request) {
+	goal, ok := loadGoalFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "failed to start delete", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE goal_id = ?`, goal.ID); err != nil {
+		http.Error(w, "failed to delete goal sessions", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := tx.Exec(`DELETE FROM goals WHERE id = ?`, goal.ID); err != nil {
+		http.Error(w, "failed to delete goal", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "failed to finish delete", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 	goal, ok := loadGoalFromRequest(w, r)
 	if !ok {
@@ -387,7 +490,37 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionDate := sessionDateString(request.EndedAt)
 	createdAt := time.Now().Format(time.RFC3339)
+	existingSession, hasExistingSession, err := loadSessionForDate(goal.ID, sessionDate)
+	if err != nil {
+		http.Error(w, "failed to load daily session", http.StatusInternalServerError)
+		return
+	}
+
+	if hasExistingSession {
+		updatedNotes := mergeSessionNotes(existingSession.Notes, request.Notes)
+		updatedTags := mergeTags(existingSession.Tags, request.Tags)
+		_, err := db.Exec(`
+			UPDATE sessions
+			SET ended_at = ?, duration_minutes = ?, notes = ?, tags = ?
+			WHERE id = ? AND goal_id = ?
+		`, request.EndedAt, existingSession.DurationMinutes+request.DurationMinutes, updatedNotes, tagsToString(updatedTags), existingSession.ID, goal.ID)
+		if err != nil {
+			http.Error(w, "failed to update daily session", http.StatusInternalServerError)
+			return
+		}
+
+		session, err := loadSession(goal.ID, existingSession.ID)
+		if err != nil {
+			http.Error(w, "failed to load daily session", http.StatusInternalServerError)
+			return
+		}
+
+		writeJSON(w, session, http.StatusOK)
+		return
+	}
+
 	result, err := db.Exec(`
 		INSERT INTO sessions (
 			goal_id, started_at, ended_at, duration_minutes,
@@ -418,6 +551,82 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, session, http.StatusCreated)
+}
+
+func updateSessionHandler(w http.ResponseWriter, r *http.Request) {
+	goal, ok := loadGoalFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	sessionID, ok := sessionIDFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	var request UpdateSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	result, err := db.Exec(`
+		UPDATE sessions
+		SET notes = ?, tags = ?
+		WHERE id = ? AND goal_id = ?
+	`, request.Notes, tagsToString(request.Tags), sessionID, goal.ID)
+	if err != nil {
+		http.Error(w, "failed to update session", http.StatusInternalServerError)
+		return
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "failed to read updated session", http.StatusInternalServerError)
+		return
+	}
+	if affected == 0 {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	session, err := loadSession(goal.ID, sessionID)
+	if err != nil {
+		http.Error(w, "failed to load updated session", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, session, http.StatusOK)
+}
+
+func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
+	goal, ok := loadGoalFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	sessionID, ok := sessionIDFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := db.Exec(`DELETE FROM sessions WHERE id = ? AND goal_id = ?`, sessionID, goal.ID)
+	if err != nil {
+		http.Error(w, "failed to delete session", http.StatusInternalServerError)
+		return
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "failed to read deleted session", http.StatusInternalServerError)
+		return
+	}
+	if affected == 0 {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func statsHandler(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +720,16 @@ func loadGoalFromRequest(w http.ResponseWriter, r *http.Request) (Goal, bool) {
 	return goal, true
 }
 
+func sessionIDFromRequest(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, err := strconv.Atoi(r.PathValue("sessionId"))
+	if err != nil {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return 0, false
+	}
+
+	return id, true
+}
+
 func loadGoals() ([]Goal, error) {
 	rows, err := db.Query(`
 		SELECT id, title, description, total_days, daily_target_minutes,
@@ -584,12 +803,12 @@ func buildGoalSummary(goal Goal) (GoalSummary, error) {
 		return GoalSummary{}, err
 	}
 
-	currentStreak, _, err := calculateGoalStreaks(goal)
+	currentStreak, _, completedDaysCount, err := calculateGoalProgress(goal)
 	if err != nil {
 		return GoalSummary{}, err
 	}
 
-	currentDay := getGoalDay(goal.StartDate, goal.TotalDays)
+	currentDay := min(completedDaysCount, goal.TotalDays)
 	return GoalSummary{
 		Goal:                goal,
 		CurrentStreak:       currentStreak,
@@ -616,45 +835,129 @@ func loadSessions(goalID int, limit int) ([]Session, error) {
 
 	sessions := []Session{}
 	for rows.Next() {
-		var session Session
-		var tags string
-		if err := rows.Scan(
-			&session.ID,
-			&session.GoalID,
-			&session.StartedAt,
-			&session.EndedAt,
-			&session.DurationMinutes,
-			&session.Notes,
-			&tags,
-			&session.CreatedAt,
-		); err != nil {
+		session, err := scanSession(rows)
+		if err != nil {
 			return nil, err
 		}
-		session.Tags = parseTags(tags)
 		sessions = append(sessions, session)
 	}
 
 	return sessions, rows.Err()
 }
 
-func loadGoalMinutesForDate(goalID int, date string) (int, error) {
-	var minutes int
-	err := db.QueryRow(`
-		SELECT COALESCE(SUM(duration_minutes), 0)
+func loadSession(goalID int, sessionID int) (Session, error) {
+	row := db.QueryRow(`
+		SELECT id, goal_id, started_at, ended_at, duration_minutes, notes, tags, created_at
 		FROM sessions
-		WHERE goal_id = ? AND substr(ended_at, 1, 10) = ?
-	`, goalID, date).Scan(&minutes)
-	return minutes, err
+		WHERE goal_id = ? AND id = ?
+	`, goalID, sessionID)
+
+	return scanSession(row)
+}
+
+func loadSessionForDate(goalID int, date string) (Session, bool, error) {
+	rows, err := db.Query(`
+		SELECT id, goal_id, started_at, ended_at, duration_minutes, notes, tags, created_at
+		FROM sessions
+		WHERE goal_id = ?
+		ORDER BY ended_at DESC, id DESC
+	`, goalID)
+	if err != nil {
+		return Session{}, false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return Session{}, false, err
+		}
+		if sessionDateString(session.EndedAt) == date {
+			return session, true, nil
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return Session{}, false, err
+	}
+
+	return Session{}, false, nil
+}
+
+type sessionScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSession(scanner sessionScanner) (Session, error) {
+	var session Session
+	var tags string
+
+	if err := scanner.Scan(
+		&session.ID,
+		&session.GoalID,
+		&session.StartedAt,
+		&session.EndedAt,
+		&session.DurationMinutes,
+		&session.Notes,
+		&tags,
+		&session.CreatedAt,
+	); err != nil {
+		return Session{}, err
+	}
+
+	session.Tags = parseTags(tags)
+	return session, nil
+}
+
+func loadGoalMinutesForDate(goalID int, date string) (int, error) {
+	rows, err := db.Query(`
+		SELECT ended_at, duration_minutes
+		FROM sessions
+		WHERE goal_id = ?
+	`, goalID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	minutes := 0
+	for rows.Next() {
+		var endedAt string
+		var durationMinutes int
+		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
+			return 0, err
+		}
+		if sessionDateString(endedAt) == date {
+			minutes += durationMinutes
+		}
+	}
+
+	return minutes, rows.Err()
 }
 
 func loadMinutesForDate(date string) (int, error) {
-	var minutes int
-	err := db.QueryRow(`
-		SELECT COALESCE(SUM(duration_minutes), 0)
+	rows, err := db.Query(`
+		SELECT ended_at, duration_minutes
 		FROM sessions
-		WHERE substr(ended_at, 1, 10) = ?
-	`, date).Scan(&minutes)
-	return minutes, err
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	minutes := 0
+	for rows.Next() {
+		var endedAt string
+		var durationMinutes int
+		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
+			return 0, err
+		}
+		if sessionDateString(endedAt) == date {
+			minutes += durationMinutes
+		}
+	}
+
+	return minutes, rows.Err()
 }
 
 func loadGoalTotalMinutes(goalID int) (int, error) {
@@ -678,30 +981,44 @@ func loadSessionTotals() (int, int, error) {
 }
 
 func calculateGoalStreaks(goal Goal) (int, int, error) {
+	current, longest, _, err := calculateGoalProgress(goal)
+	return current, longest, err
+}
+
+func calculateGoalProgress(goal Goal) (int, int, int, error) {
 	rows, err := db.Query(`
-		SELECT substr(ended_at, 1, 10), COALESCE(SUM(duration_minutes), 0)
+		SELECT ended_at, duration_minutes
 		FROM sessions
 		WHERE goal_id = ?
-		GROUP BY substr(ended_at, 1, 10)
 	`, goal.ID)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	defer rows.Close()
 
-	completedDays := map[string]bool{}
+	dayMinutes := map[string]int{}
 	for rows.Next() {
-		var date string
-		var minutes int
-		if err := rows.Scan(&date, &minutes); err != nil {
-			return 0, 0, err
+		var endedAt string
+		var durationMinutes int
+		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
+			return 0, 0, 0, err
 		}
 
-		completedDays[date] = minutes >= goal.DailyTargetMinutes
+		dayMinutes[sessionDateString(endedAt)] += durationMinutes
 	}
 
 	if err := rows.Err(); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
+	}
+
+	completedDays := map[string]bool{}
+	completedDaysCount := 0
+	for date, minutes := range dayMinutes {
+		isCompleted := minutes >= goal.DailyTargetMinutes
+		completedDays[date] = isCompleted
+		if isCompleted {
+			completedDaysCount++
+		}
 	}
 
 	current := 0
@@ -727,7 +1044,7 @@ func calculateGoalStreaks(goal Goal) (int, int, error) {
 		running = 0
 	}
 
-	return current, longest, nil
+	return current, longest, completedDaysCount, nil
 }
 
 func buildWeeklyStats(dailyTarget int) ([]DailyStat, error) {
@@ -760,13 +1077,30 @@ func loadMonthlyTotal() (int, error) {
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format(time.DateOnly)
 	nextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location()).Format(time.DateOnly)
 
-	var minutes int
-	err := db.QueryRow(`
-		SELECT COALESCE(SUM(duration_minutes), 0)
+	rows, err := db.Query(`
+		SELECT ended_at, duration_minutes
 		FROM sessions
-		WHERE substr(ended_at, 1, 10) >= ? AND substr(ended_at, 1, 10) < ?
-	`, monthStart, nextMonth).Scan(&minutes)
-	return minutes, err
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	minutes := 0
+	for rows.Next() {
+		var endedAt string
+		var durationMinutes int
+		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
+			return 0, err
+		}
+
+		date := sessionDateString(endedAt)
+		if date >= monthStart && date < nextMonth {
+			minutes += durationMinutes
+		}
+	}
+
+	return minutes, rows.Err()
 }
 
 func loadGoalDistribution(totalMinutes int) ([]GoalDistribution, error) {
@@ -851,8 +1185,63 @@ func cleanTags(tags []string) []string {
 	return result
 }
 
+func mergeSessionNotes(current string, next string) string {
+	current = strings.TrimSpace(current)
+	next = strings.TrimSpace(next)
+
+	if current == "" {
+		return next
+	}
+	if next == "" || current == next {
+		return current
+	}
+
+	return current + "\n" + next
+}
+
+func mergeTags(current []string, next []string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, tag := range append(cleanTags(current), cleanTags(next)...) {
+		key := strings.ToLower(tag)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, tag)
+	}
+
+	return result
+}
+
 func todayString() string {
 	return time.Now().Format(time.DateOnly)
+}
+
+func sessionDateString(value string) string {
+	if timestamp, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		if strings.HasSuffix(value, "Z") {
+			return timestamp.Local().Format(time.DateOnly)
+		}
+		return timestamp.Format(time.DateOnly)
+	}
+
+	if timestamp, err := time.Parse(time.RFC3339, value); err == nil {
+		if strings.HasSuffix(value, "Z") {
+			return timestamp.Local().Format(time.DateOnly)
+		}
+		return timestamp.Format(time.DateOnly)
+	}
+
+	if timestamp, err := time.ParseInLocation(time.DateOnly, value, time.Local); err == nil {
+		return timestamp.Format(time.DateOnly)
+	}
+
+	if len(value) >= len(time.DateOnly) {
+		return value[:len(time.DateOnly)]
+	}
+
+	return todayString()
 }
 
 func parseDateOrToday(value string) time.Time {
@@ -881,7 +1270,7 @@ func percent(value int, total int) int {
 }
 
 func weekdayLabel(date time.Time) string {
-	labels := []string{"Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"}
+	labels := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 	return labels[int(date.Weekday())]
 }
 

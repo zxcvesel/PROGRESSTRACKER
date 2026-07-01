@@ -70,6 +70,7 @@ type GoalForm = {
   description: string
   totalDays: string
   dailyTargetHours: string
+  dailyTargetMinutes: string
 }
 
 const defaultStats: AppStats = {
@@ -85,6 +86,7 @@ const defaultStats: AppStats = {
 }
 
 const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
+const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 
 function App() {
   const [backendStatus, setBackendStatus] = useState('checking')
@@ -101,45 +103,70 @@ function App() {
     description: '',
     totalDays: '90',
     dailyTargetHours: '2',
+    dailyTargetMinutes: '0',
   })
 
   const [sessionState, setSessionState] = useState<SessionState>('idle')
   const [sessionStartedAt, setSessionStartedAt] = useState('')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [timerSpeed, setTimerSpeed] = useState(1)
   const [finishModalOpen, setFinishModalOpen] = useState(false)
   const [sessionNotes, setSessionNotes] = useState('')
   const [sessionTags, setSessionTags] = useState('')
+  const [isEditingGoal, setIsEditingGoal] = useState(false)
+  const [editGoalForm, setEditGoalForm] = useState<GoalForm>({
+    title: '',
+    description: '',
+    totalDays: '90',
+    dailyTargetHours: '2',
+    dailyTargetMinutes: '0',
+  })
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null)
+  const [sessionEditNotes, setSessionEditNotes] = useState('')
+  const [sessionEditTags, setSessionEditTags] = useState('')
 
   useEffect(() => {
     loadInitialData()
   }, [])
 
   useEffect(() => {
-    if (sessionState !== 'running') {
+    if (sessionState !== 'running' || !goalDetail) {
       return
     }
 
     const timer = window.setInterval(() => {
-      setElapsedSeconds((current) => current + 1)
+      setElapsedSeconds((current) => {
+        const targetSeconds = Math.max((goalDetail.dailyTargetMinutes - goalDetail.todayMinutes) * 60, 0)
+        const next = current + timerSpeed
+
+        if (targetSeconds > 0 && next >= targetSeconds) {
+          window.clearInterval(timer)
+          setSessionState('paused')
+          setFinishModalOpen(true)
+          return targetSeconds
+        }
+
+        return next
+      })
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [sessionState])
+  }, [goalDetail, sessionState, timerSpeed])
 
   const screenTitle = useMemo(() => {
     if (view === 'create') {
-      return 'Новая цель'
+      return 'New goal'
     }
 
     if (view === 'stats') {
-      return 'Статистика'
+      return 'Stats'
     }
 
     if (selectedGoalId) {
-      return 'Цель'
+      return 'Goal'
     }
 
-    return 'Цели'
+    return 'Goals'
   }, [selectedGoalId, view])
 
   async function loadInitialData() {
@@ -181,6 +208,8 @@ function App() {
   async function openGoal(goalId: number) {
     setSelectedGoalId(goalId)
     setView('goals')
+    setIsEditingGoal(false)
+    setEditingSessionId(null)
     await loadGoalDetail(goalId)
   }
 
@@ -194,6 +223,14 @@ function App() {
     event.preventDefault()
     setFormError('')
 
+    const dailyTargetMinutes =
+      Number(goalForm.dailyTargetHours) * 60 + Number(goalForm.dailyTargetMinutes)
+
+    if (dailyTargetMinutes <= 0) {
+      setFormError('Daily target must be greater than 0')
+      return
+    }
+
     try {
       const response = await fetch('/api/goals', {
         method: 'POST',
@@ -204,7 +241,7 @@ function App() {
           title: goalForm.title,
           description: goalForm.description,
           totalDays: Number(goalForm.totalDays),
-          dailyTargetMinutes: Math.round(Number(goalForm.dailyTargetHours) * 60),
+          dailyTargetMinutes,
         }),
       })
 
@@ -219,17 +256,27 @@ function App() {
         description: '',
         totalDays: '90',
         dailyTargetHours: '2',
+        dailyTargetMinutes: '0',
       })
       setView('goals')
       await openGoal(createdGoal.id)
       await loadStats()
     } catch {
-      setFormError('Не удалось создать цель')
+      setFormError('Could not create goal')
     }
   }
 
   function startSession() {
-    setSessionStartedAt(new Date().toISOString())
+    if (!goalDetail) {
+      return
+    }
+
+    if (goalDetail.todayMinutes >= goalDetail.dailyTargetMinutes) {
+      window.alert('Today target is already complete')
+      return
+    }
+
+    setSessionStartedAt(toLocalISOString(new Date()))
     setElapsedSeconds(0)
     setSessionState('running')
   }
@@ -258,8 +305,8 @@ function App() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        startedAt: sessionStartedAt || new Date().toISOString(),
-        endedAt: new Date().toISOString(),
+        startedAt: sessionStartedAt || toLocalISOString(new Date()),
+        endedAt: toLocalISOString(new Date()),
         durationMinutes: Math.max(1, Math.ceil(elapsedSeconds / 60)),
         notes: sessionNotes,
         tags: sessionTags
@@ -270,7 +317,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setFormError('Не удалось сохранить сессию')
+      setFormError('Could not save session')
       return
     }
 
@@ -278,8 +325,146 @@ function App() {
     await Promise.all([loadGoals(), loadStats(), loadGoalDetail(goalDetail.id)])
   }
 
-  function discardSession() {
+  function startEditGoal() {
+    if (!goalDetail) {
+      return
+    }
+
+    setEditGoalForm(goalToForm(goalDetail))
+    setIsEditingGoal(true)
+    setFormError('')
+  }
+
+  async function updateGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!goalDetail) {
+      return
+    }
+
+    const dailyTargetMinutes =
+      Number(editGoalForm.dailyTargetHours) * 60 + Number(editGoalForm.dailyTargetMinutes)
+
+    if (dailyTargetMinutes <= 0) {
+      setFormError('Daily target must be greater than 0')
+      return
+    }
+
+    const response = await fetch(`/api/goals/${goalDetail.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: editGoalForm.title,
+        description: editGoalForm.description,
+        totalDays: Number(editGoalForm.totalDays),
+        dailyTargetMinutes,
+        status: goalDetail.status,
+      }),
+    })
+
+    if (!response.ok) {
+      setFormError('Could not update goal')
+      return
+    }
+
+    setIsEditingGoal(false)
+    setFormError('')
+    await Promise.all([loadGoals(), loadStats(), loadGoalDetail(goalDetail.id)])
+  }
+
+  async function deleteGoal() {
+    if (!goalDetail) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Delete "${goalDetail.title}"? All saved sessions for this goal will also be deleted.`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    const response = await fetch(`/api/goals/${goalDetail.id}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      window.alert('Could not delete goal')
+      return
+    }
+
     resetSession()
+    setSelectedGoalId(null)
+    setGoalDetail(null)
+    setView('goals')
+    setIsEditingGoal(false)
+    await Promise.all([loadGoals(), loadStats()])
+  }
+
+  function startEditSession(session: Session) {
+    setEditingSessionId(session.id)
+    setSessionEditNotes(session.notes)
+    setSessionEditTags(session.tags.join(', '))
+  }
+
+  async function updateSession(sessionId: number) {
+    if (!goalDetail) {
+      return
+    }
+
+    const response = await fetch(`/api/goals/${goalDetail.id}/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        notes: sessionEditNotes,
+        tags: sessionEditTags
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      }),
+    })
+
+    if (!response.ok) {
+      window.alert('Could not update session')
+      return
+    }
+
+    setEditingSessionId(null)
+    await Promise.all([loadGoals(), loadStats(), loadGoalDetail(goalDetail.id)])
+  }
+
+  async function deleteSession(session: Session) {
+    if (!goalDetail) {
+      return
+    }
+
+    const confirmed = window.confirm(`Delete ${formatMinutes(session.durationMinutes)} session?`)
+    if (!confirmed) {
+      return
+    }
+
+    const response = await fetch(`/api/goals/${goalDetail.id}/sessions/${session.id}`, {
+      method: 'DELETE',
+    })
+
+    if (!response.ok) {
+      window.alert('Could not delete session')
+      return
+    }
+
+    if (editingSessionId === session.id) {
+      setEditingSessionId(null)
+    }
+    await Promise.all([loadGoals(), loadStats(), loadGoalDetail(goalDetail.id)])
+  }
+
+  function closeFinishModal() {
+    setFinishModalOpen(false)
+    setFormError('')
   }
 
   function resetSession() {
@@ -290,6 +475,7 @@ function App() {
     setSessionNotes('')
     setSessionTags('')
     setFormError('')
+    setTimerSpeed(1)
   }
 
   return (
@@ -300,11 +486,13 @@ function App() {
             <button
               className="icon-button"
               type="button"
-              aria-label={selectedGoalId ? 'Назад к целям' : 'Открыть меню'}
+              aria-label={selectedGoalId ? 'Back to goals' : 'Open menu'}
               onClick={() => {
                 if (selectedGoalId) {
                   setSelectedGoalId(null)
                   setGoalDetail(null)
+                  setIsEditingGoal(false)
+                  setEditingSessionId(null)
                   resetSession()
                 }
               }}
@@ -332,11 +520,33 @@ function App() {
             <GoalDetailsScreen
               goal={goalDetail}
               elapsedSeconds={elapsedSeconds}
+              timerSpeed={timerSpeed}
+              isEditingGoal={isEditingGoal}
+              editGoalForm={editGoalForm}
+              formError={formError}
               sessionState={sessionState}
+              editingSessionId={editingSessionId}
+              sessionEditNotes={sessionEditNotes}
+              sessionEditTags={sessionEditTags}
+              onTimerSpeedChange={setTimerSpeed}
+              onEditGoalChange={setEditGoalForm}
+              onEditGoalSubmit={updateGoal}
+              onEditGoalStart={startEditGoal}
+              onEditGoalCancel={() => {
+                setIsEditingGoal(false)
+                setFormError('')
+              }}
               onStart={startSession}
               onPause={pauseSession}
               onResume={resumeSession}
               onFinish={finishSession}
+              onDelete={deleteGoal}
+              onEditSessionStart={startEditSession}
+              onEditSessionCancel={() => setEditingSessionId(null)}
+              onEditSessionSave={updateSession}
+              onDeleteSession={deleteSession}
+              onSessionEditNotesChange={setSessionEditNotes}
+              onSessionEditTagsChange={setSessionEditTags}
             />
           )}
 
@@ -352,7 +562,7 @@ function App() {
           {view === 'stats' && <StatsScreen stats={stats} />}
         </div>
 
-        <nav className="bottom-nav" aria-label="Основная навигация">
+        <nav className="bottom-nav" aria-label="Main navigation">
           <button
             className={view === 'goals' ? 'is-active' : ''}
             type="button"
@@ -360,10 +570,12 @@ function App() {
               setView('goals')
               setSelectedGoalId(null)
               setGoalDetail(null)
+              setIsEditingGoal(false)
+              setEditingSessionId(null)
             }}
-            aria-label="Цели"
+            aria-label="Goals"
           >
-            <HomeIcon />
+            <FlameIcon />
           </button>
           <button
             className={view === 'create' ? 'is-active' : ''}
@@ -372,8 +584,10 @@ function App() {
               setView('create')
               setSelectedGoalId(null)
               setGoalDetail(null)
+              setIsEditingGoal(false)
+              setEditingSessionId(null)
             }}
-            aria-label="Создать цель"
+            aria-label="Create goal"
           >
             <PlusIcon />
           </button>
@@ -384,8 +598,10 @@ function App() {
               setView('stats')
               setSelectedGoalId(null)
               setGoalDetail(null)
+              setIsEditingGoal(false)
+              setEditingSessionId(null)
             }}
-            aria-label="Статистика"
+            aria-label="Stats"
           >
             <ChartIcon />
           </button>
@@ -401,7 +617,7 @@ function App() {
             onNotesChange={setSessionNotes}
             onTagsChange={setSessionTags}
             onSave={saveSession}
-            onDiscard={discardSession}
+            onClose={closeFinishModal}
           />
         )}
       </section>
@@ -421,19 +637,19 @@ function GoalsScreen({
   onOpenGoal: (goalId: number) => void
 }) {
   if (isLoading) {
-    return <p className="empty-message">Загружаем цели...</p>
+    return <p className="empty-message">Loading goals...</p>
   }
 
   if (goals.length === 0) {
     return (
       <section className="empty-state">
         <div className="flame-orb" aria-hidden="true">
-          <HomeIcon />
+          <FlameIcon />
         </div>
-        <h1>Создай первую цель</h1>
+        <h1>Create your first goal</h1>
         <p>
-          Трекер работает вокруг долгосрочных целей: выбери направление, дневную норму и
-          отмечай реальные учебные сессии таймером.
+          Build long-term momentum: choose a focus, set a daily target, and track real
+          practice sessions with the timer.
         </p>
         <button className="primary-button" type="button" onClick={onCreate}>
           Create goal
@@ -445,8 +661,8 @@ function GoalsScreen({
   return (
     <section className="goals-list">
       <div className="section-heading">
-        <h2>Мои цели</h2>
-        <span>{goals.length} активных</span>
+        <h2>My goals</h2>
+        <span>{goals.length} active</span>
       </div>
 
       {goals.map((goal, index) => (
@@ -458,13 +674,13 @@ function GoalsScreen({
             />
             <div>
               <h3>{goal.title}</h3>
-              <p>{goal.description || 'Долгосрочная учебная цель'}</p>
+              <p>{goal.description || 'Long-term learning goal'}</p>
             </div>
             <span className={`status-pill status-pill--${goal.status}`}>{goal.status}</span>
           </div>
 
           <div className="goal-card__metrics">
-            <span>Streak: {goal.currentStreak} дн.</span>
+            <span>Streak: {goal.currentStreak} days</span>
             <span>
               Today: {formatMinutes(goal.todayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}
             </span>
@@ -474,7 +690,7 @@ function GoalsScreen({
 
           <div className="goal-card__footer">
             <span>Day {goal.currentDay} of {goal.totalDays}</span>
-            <span>{goal.totalProgressPct}% всего</span>
+            <span>{goal.totalProgressPct}% total</span>
           </div>
         </button>
       ))}
@@ -496,12 +712,12 @@ function CreateGoalScreen({
   return (
     <form className="entry-form" onSubmit={onSubmit}>
       <div className="section-heading">
-        <h2>Создать цель</h2>
-        <span>долгий фокус</span>
+        <h2>Create goal</h2>
+        <span>long-term focus</span>
       </div>
 
       <label>
-        Название
+        Title
         <input
           value={form.title}
           onChange={(event) => onChange({ ...form, title: event.target.value })}
@@ -511,18 +727,18 @@ function CreateGoalScreen({
       </label>
 
       <label>
-        Описание
+        Description
         <textarea
           value={form.description}
           onChange={(event) => onChange({ ...form, description: event.target.value })}
-          placeholder="Изучать язык, писать API и закреплять практикой"
+          placeholder="Study the language, build APIs, and reinforce with practice"
           rows={3}
         />
       </label>
 
-      <div className="form-row">
+      <div className="form-row form-row--single">
         <label>
-          Дней
+          Days
           <input
             type="number"
             min="1"
@@ -531,22 +747,37 @@ function CreateGoalScreen({
             required
           />
         </label>
+      </div>
 
+      <div className="form-row form-row--target">
         <label>
-          Часов в день
+          Daily target hours
           <input
             type="number"
-            min="0.25"
-            step="0.25"
+            min="0"
+            step="1"
             value={form.dailyTargetHours}
             onChange={(event) => onChange({ ...form, dailyTargetHours: event.target.value })}
+            required
+          />
+        </label>
+
+        <label>
+          Minutes
+          <input
+            type="number"
+            min="0"
+            max="59"
+            step="5"
+            value={form.dailyTargetMinutes}
+            onChange={(event) => onChange({ ...form, dailyTargetMinutes: event.target.value })}
             required
           />
         </label>
       </div>
 
       <p className="form-hint">
-        Старт цели будет установлен автоматически на сегодняшний день. Стрик считается ежедневно.
+        The goal starts today automatically. Streaks are counted daily.
       </p>
 
       {formError && <p className="form-error">{formError}</p>}
@@ -558,25 +789,155 @@ function CreateGoalScreen({
   )
 }
 
+function GoalEditForm({
+  form,
+  formError,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  form: GoalForm
+  formError: string
+  onChange: (form: GoalForm) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onCancel: () => void
+}) {
+  return (
+    <form className="entry-form" onSubmit={onSubmit}>
+      <div className="section-heading">
+        <h2>Edit goal</h2>
+        <span>adjust target</span>
+      </div>
+
+      <label>
+        Title
+        <input
+          value={form.title}
+          onChange={(event) => onChange({ ...form, title: event.target.value })}
+          required
+        />
+      </label>
+
+      <label>
+        Description
+        <textarea
+          value={form.description}
+          onChange={(event) => onChange({ ...form, description: event.target.value })}
+          rows={3}
+        />
+      </label>
+
+      <div className="form-row form-row--single">
+        <label>
+          Days
+          <input
+            type="number"
+            min="1"
+            value={form.totalDays}
+            onChange={(event) => onChange({ ...form, totalDays: event.target.value })}
+            required
+          />
+        </label>
+      </div>
+
+      <div className="form-row form-row--target">
+        <label>
+          Daily target hours
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={form.dailyTargetHours}
+            onChange={(event) => onChange({ ...form, dailyTargetHours: event.target.value })}
+            required
+          />
+        </label>
+
+        <label>
+          Minutes
+          <input
+            type="number"
+            min="0"
+            max="59"
+            step="5"
+            value={form.dailyTargetMinutes}
+            onChange={(event) => onChange({ ...form, dailyTargetMinutes: event.target.value })}
+            required
+          />
+        </label>
+      </div>
+
+      {formError && <p className="form-error">{formError}</p>}
+
+      <div className="sheet-actions">
+        <button className="ghost-button" type="button" onClick={onCancel}>Cancel</button>
+        <button className="primary-button" type="submit">Save changes</button>
+      </div>
+    </form>
+  )
+}
+
 function GoalDetailsScreen({
   goal,
   elapsedSeconds,
+  timerSpeed,
+  isEditingGoal,
+  editGoalForm,
+  formError,
   sessionState,
+  editingSessionId,
+  sessionEditNotes,
+  sessionEditTags,
+  onTimerSpeedChange,
+  onEditGoalChange,
+  onEditGoalSubmit,
+  onEditGoalStart,
+  onEditGoalCancel,
   onStart,
   onPause,
   onResume,
   onFinish,
+  onDelete,
+  onEditSessionStart,
+  onEditSessionCancel,
+  onEditSessionSave,
+  onDeleteSession,
+  onSessionEditNotesChange,
+  onSessionEditTagsChange,
 }: {
   goal: GoalDetail
   elapsedSeconds: number
+  timerSpeed: number
+  isEditingGoal: boolean
+  editGoalForm: GoalForm
+  formError: string
   sessionState: SessionState
+  editingSessionId: number | null
+  sessionEditNotes: string
+  sessionEditTags: string
+  onTimerSpeedChange: (speed: number) => void
+  onEditGoalChange: (form: GoalForm) => void
+  onEditGoalSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onEditGoalStart: () => void
+  onEditGoalCancel: () => void
   onStart: () => void
   onPause: () => void
   onResume: () => void
   onFinish: () => void
+  onDelete: () => void
+  onEditSessionStart: (session: Session) => void
+  onEditSessionCancel: () => void
+  onEditSessionSave: (sessionId: number) => void
+  onDeleteSession: (session: Session) => void
+  onSessionEditNotesChange: (value: string) => void
+  onSessionEditTagsChange: (value: string) => void
 }) {
+  const liveSessionMinutes = sessionState === 'idle' ? 0 : Math.ceil(elapsedSeconds / 60)
+  const liveTodayMinutes = goal.todayMinutes + liveSessionMinutes
+  const liveTodayProgressPct = percent(liveTodayMinutes, goal.dailyTargetMinutes)
+  const liveRemainingMinutes = Math.max(goal.dailyTargetMinutes - liveTodayMinutes, 0)
   const ringStyle = {
-    '--ring-progress': `${goal.todayProgressPct}%`,
+    '--ring-progress': `${goal.totalProgressPct}%`,
   } as CSSProperties
 
   return (
@@ -584,19 +945,19 @@ function GoalDetailsScreen({
       <section className="hero-panel">
         <div className="hero-copy">
           <span className="flame-orb" aria-hidden="true">
-            <HomeIcon />
+            <FlameIcon />
           </span>
           <div>
             <strong>{goal.currentStreak}</strong>
-            <p>дней streak</p>
+            <p>day streak</p>
           </div>
         </div>
         <div
           className="hero-ring"
           style={ringStyle}
-          aria-label={`Сегодня выполнено ${goal.todayProgressPct}%`}
+          aria-label={`Goal completed ${goal.totalProgressPct}%`}
         >
-          <span>{goal.todayProgressPct}%</span>
+          <span>{goal.totalProgressPct}%</span>
         </div>
       </section>
 
@@ -605,16 +966,49 @@ function GoalDetailsScreen({
           <h2>{goal.title}</h2>
           <span>{goal.status}</span>
         </div>
-        <p>{formatMinutes(goal.todayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}</p>
-        <small>{formatMinutes(goal.todayRemainingMinutes)} осталось сегодня</small>
-        <ProgressBar value={goal.todayProgressPct} />
+        <p>{formatMinutes(liveTodayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}</p>
+        <small>{formatMinutes(liveRemainingMinutes)} left today</small>
+        <div className="goal-progress-label">
+          <span>Today target</span>
+          <span>{liveTodayProgressPct}%</span>
+        </div>
+        <ProgressBar value={liveTodayProgressPct} />
         <div className="goal-meta">
           <span>Day {goal.currentDay} of {goal.totalDays}</span>
-          <span>{goal.totalProgressPct}% цели</span>
+          <span>{formatMinutes(goal.totalPracticeMinutes)} practiced</span>
         </div>
+        <button className="ghost-button compact-button" type="button" onClick={onEditGoalStart}>
+          Edit goal
+        </button>
       </section>
 
+      {isEditingGoal && (
+        <GoalEditForm
+          form={editGoalForm}
+          formError={formError}
+          onChange={onEditGoalChange}
+          onSubmit={onEditGoalSubmit}
+          onCancel={onEditGoalCancel}
+        />
+      )}
+
       <section className="timer-panel">
+        <div className="dev-speed-panel" aria-label="Development timer speed">
+          <span>Dev timer</span>
+          <div>
+            {timerSpeeds.map((speed) => (
+              <button
+                className={timerSpeed === speed ? 'is-selected' : ''}
+                type="button"
+                key={speed}
+                onClick={() => onTimerSpeedChange(speed)}
+              >
+                {speed}x
+              </button>
+            ))}
+          </div>
+        </div>
+
         {sessionState === 'idle' && (
           <button className="primary-button primary-button--large" type="button" onClick={onStart}>
             Start session
@@ -623,7 +1017,7 @@ function GoalDetailsScreen({
 
         {sessionState !== 'idle' && (
           <>
-            <p>{sessionState === 'running' ? 'Сессия идет' : 'Пауза'}</p>
+            <p>{sessionState === 'running' ? 'Session running' : 'Paused'}</p>
             <strong>{formatTimer(elapsedSeconds)}</strong>
             <div className="timer-actions">
               {sessionState === 'running' ? (
@@ -637,7 +1031,24 @@ function GoalDetailsScreen({
         )}
       </section>
 
-      <HistorySection sessions={goal.recentSessions} />
+      <HistorySection
+        sessions={goal.recentSessions}
+        editingSessionId={editingSessionId}
+        editNotes={sessionEditNotes}
+        editTags={sessionEditTags}
+        onEditStart={onEditSessionStart}
+        onEditCancel={onEditSessionCancel}
+        onEditSave={onEditSessionSave}
+        onDelete={onDeleteSession}
+        onNotesChange={onSessionEditNotesChange}
+        onTagsChange={onSessionEditTagsChange}
+      />
+
+      <section className="danger-panel">
+        <button className="danger-button" type="button" onClick={onDelete}>
+          Delete goal
+        </button>
+      </section>
     </>
   )
 }
@@ -651,7 +1062,7 @@ function FinishSessionModal({
   onNotesChange,
   onTagsChange,
   onSave,
-  onDiscard,
+  onClose,
 }: {
   goal: GoalDetail
   elapsedSeconds: number
@@ -661,7 +1072,7 @@ function FinishSessionModal({
   onNotesChange: (value: string) => void
   onTagsChange: (value: string) => void
   onSave: () => void
-  onDiscard: () => void
+  onClose: () => void
 }) {
   return (
     <div className="modal-backdrop">
@@ -677,7 +1088,7 @@ function FinishSessionModal({
           <textarea
             value={notes}
             onChange={(event) => onNotesChange(event.target.value)}
-            placeholder="Что сделал, изучил или завершил сегодня?"
+            placeholder="What did you do, learn, or complete today?"
             rows={4}
           />
         </label>
@@ -694,7 +1105,7 @@ function FinishSessionModal({
         {formError && <p className="form-error">{formError}</p>}
 
         <div className="sheet-actions">
-          <button className="ghost-button" type="button" onClick={onDiscard}>Discard</button>
+          <button className="ghost-button" type="button" onClick={onClose}>Back</button>
           <button className="primary-button" type="button" onClick={onSave}>Save session</button>
         </div>
       </section>
@@ -707,7 +1118,7 @@ function StatsScreen({ stats }: { stats: AppStats }) {
 
   return (
     <>
-      <section className="stats-grid stats-grid--large" aria-label="Статистика">
+      <section className="stats-grid stats-grid--large" aria-label="Statistics">
         <article className="stat-card">
           <p>Sessions</p>
           <strong>{stats.totalSessions}</strong>
@@ -728,8 +1139,8 @@ function StatsScreen({ stats }: { stats: AppStats }) {
 
       <section className="chart-panel">
         <div className="section-heading">
-          <h2>Сегодня</h2>
-          <span>{todayPercent}% нормы</span>
+          <h2>Today</h2>
+          <span>{todayPercent}% of target</span>
         </div>
         <p className="chart-caption">
           {formatMinutes(stats.todayMinutes)} / {formatMinutes(stats.dailyTargetMinutes)}
@@ -739,8 +1150,8 @@ function StatsScreen({ stats }: { stats: AppStats }) {
 
       <section className="chart-panel">
         <div className="section-heading">
-          <h2>Неделя</h2>
-          <span>факт против нормы</span>
+          <h2>Week</h2>
+          <span>actual vs target</span>
         </div>
         <div className="weekly-chart">
           {stats.weekly.map((day) => {
@@ -762,11 +1173,11 @@ function StatsScreen({ stats }: { stats: AppStats }) {
 
       <section className="chart-panel">
         <div className="section-heading">
-          <h2>Месяц</h2>
+          <h2>Month</h2>
           <span>{formatMinutes(stats.monthlyTotalMinutes)}</span>
         </div>
         {stats.goalDistribution.length === 0 && (
-          <p className="empty-message">Распределение появится после первой сессии.</p>
+          <p className="empty-message">Distribution will appear after your first session.</p>
         )}
         {stats.goalDistribution.map((item, index) => (
           <article className="category-row" key={item.goalId}>
@@ -790,7 +1201,29 @@ function StatsScreen({ stats }: { stats: AppStats }) {
   )
 }
 
-function HistorySection({ sessions }: { sessions: Session[] }) {
+function HistorySection({
+  sessions,
+  editingSessionId,
+  editNotes,
+  editTags,
+  onEditStart,
+  onEditCancel,
+  onEditSave,
+  onDelete,
+  onNotesChange,
+  onTagsChange,
+}: {
+  sessions: Session[]
+  editingSessionId: number | null
+  editNotes: string
+  editTags: string
+  onEditStart: (session: Session) => void
+  onEditCancel: () => void
+  onEditSave: (sessionId: number) => void
+  onDelete: (session: Session) => void
+  onNotesChange: (value: string) => void
+  onTagsChange: (value: string) => void
+}) {
   return (
     <section className="entries-section">
       <div className="section-heading">
@@ -798,7 +1231,7 @@ function HistorySection({ sessions }: { sessions: Session[] }) {
         <span>{sessions.length} recent</span>
       </div>
       {sessions.length === 0 && (
-        <p className="empty-message">Сессий пока нет. Запусти таймер и сохрани результат.</p>
+        <p className="empty-message">No sessions yet. Start the timer and save your result.</p>
       )}
       {sessions.map((session, index) => (
         <article className="history-card" key={session.id}>
@@ -809,13 +1242,44 @@ function HistorySection({ sessions }: { sessions: Session[] }) {
           <div>
             <p>{formatSessionDate(session.endedAt)}</p>
             <strong>{formatMinutes(session.durationMinutes)}</strong>
-            {session.notes && <span>{session.notes}</span>}
-            {session.tags.length > 0 && (
-              <div className="tag-row">
-                {session.tags.map((tag) => (
-                  <small key={tag}>{tag}</small>
-                ))}
+            {editingSessionId === session.id ? (
+              <div className="history-edit-form">
+                <label>
+                  Notes
+                  <textarea
+                    value={editNotes}
+                    onChange={(event) => onNotesChange(event.target.value)}
+                    rows={3}
+                  />
+                </label>
+                <label>
+                  Tags
+                  <input
+                    value={editTags}
+                    onChange={(event) => onTagsChange(event.target.value)}
+                    placeholder="SQLite, API, stats"
+                  />
+                </label>
+                <div className="history-actions">
+                  <button type="button" onClick={onEditCancel}>Cancel</button>
+                  <button className="history-action--primary" type="button" onClick={() => onEditSave(session.id)}>Save</button>
+                </div>
               </div>
+            ) : (
+              <>
+                {session.notes && <span>{session.notes}</span>}
+                {session.tags.length > 0 && (
+                  <div className="tag-row">
+                    {session.tags.map((tag) => (
+                      <small key={tag}>{tag}</small>
+                    ))}
+                  </div>
+                )}
+                <div className="history-actions">
+                  <button type="button" onClick={() => onEditStart(session)}>Edit</button>
+                  <button className="history-action--danger" type="button" onClick={() => onDelete(session)}>Delete</button>
+                </div>
+              </>
             )}
           </div>
         </article>
@@ -847,10 +1311,21 @@ function formatMinutes(totalMinutes: number) {
   return `${hours}h ${minutes}m`
 }
 
+function goalToForm(goal: GoalSummary): GoalForm {
+  return {
+    title: goal.title,
+    description: goal.description,
+    totalDays: String(goal.totalDays),
+    dailyTargetHours: String(Math.floor(goal.dailyTargetMinutes / 60)),
+    dailyTargetMinutes: String(goal.dailyTargetMinutes % 60),
+  }
+}
+
 function formatTimer(seconds: number) {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const restSeconds = seconds % 60
+  const normalizedSeconds = Math.floor(seconds)
+  const hours = Math.floor(normalizedSeconds / 3600)
+  const minutes = Math.floor((normalizedSeconds % 3600) / 60)
+  const restSeconds = normalizedSeconds % 60
 
   return [hours, minutes, restSeconds]
     .map((value) => String(value).padStart(2, '0'))
@@ -864,6 +1339,16 @@ function formatSessionDate(value: string) {
   }).format(new Date(value))
 }
 
+function toLocalISOString(date: Date) {
+  const timezoneOffset = -date.getTimezoneOffset()
+  const sign = timezoneOffset >= 0 ? '+' : '-'
+  const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60)
+  const offsetMinutes = Math.abs(timezoneOffset) % 60
+  const localDate = new Date(date.getTime() + timezoneOffset * 60 * 1000)
+
+  return `${localDate.toISOString().slice(0, 19)}${sign}${String(offsetHours).padStart(2, '0')}:${String(offsetMinutes).padStart(2, '0')}`
+}
+
 function percent(value: number, total: number) {
   if (total <= 0) {
     return 0
@@ -872,10 +1357,11 @@ function percent(value: number, total: number) {
   return Math.min(Math.round((value / total) * 100), 100)
 }
 
-function HomeIcon() {
+function FlameIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-8.5Z" />
+      <path d="M12.2 3.5c.5 2.7-.6 4.4-2 5.9-1.3 1.4-2.5 2.7-2.5 4.9a4.4 4.4 0 0 0 8.8.1c0-1.8-.9-3.4-2.4-4.8.1 1.4-.4 2.4-1.5 3.1-.4-2.6.8-4.7-.4-9.2Z" />
+      <path d="M12 20.8c-4 0-7.1-2.8-7.1-6.8 0-2.7 1.5-4.6 3.1-6.2 1.5-1.5 3.1-3.1 3.2-5.8 4 2.8 6.4 6.4 6.4 10.6 1.1-.9 1.6-2.1 1.6-3.5 1.4 1.5 2 3.1 2 4.8 0 4.1-3.2 6.9-9.2 6.9Z" />
     </svg>
   )
 }
