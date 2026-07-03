@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import './App.css'
 
 type View = 'goals' | 'create' | 'stats'
 type SessionState = 'idle' | 'running' | 'paused'
+type ThemeMode = 'midnight' | 'graphite' | 'contrast'
+type AccentColor = 'cyan' | 'purple' | 'orange' | 'green'
+type FontSize = 'compact' | 'default' | 'large'
+type AppLanguage = 'en' | 'ru'
 
 type GoalSummary = {
   id: number
@@ -73,6 +77,18 @@ type GoalForm = {
   dailyTargetMinutes: string
 }
 
+type AppSettings = {
+  theme: ThemeMode
+  accent: AccentColor
+  fontSize: FontSize
+  reducedEffects: boolean
+  language: AppLanguage
+  defaultGoalDays: string
+  defaultTargetHours: string
+  defaultTargetMinutes: string
+  confirmGoalDelete: boolean
+}
+
 const defaultStats: AppStats = {
   totalSessions: 0,
   totalPracticeMinutes: 0,
@@ -87,10 +103,24 @@ const defaultStats: AppStats = {
 
 const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
 const timerSpeeds = [0.5, 1, 1.5, 2, 5]
+const settingsStorageKey = 'progress-tracker-settings'
+const defaultSettings: AppSettings = {
+  theme: 'midnight',
+  accent: 'cyan',
+  fontSize: 'default',
+  reducedEffects: false,
+  language: 'en',
+  defaultGoalDays: '90',
+  defaultTargetHours: '2',
+  defaultTargetMinutes: '0',
+  confirmGoalDelete: true,
+}
 
 function App() {
   const [backendStatus, setBackendStatus] = useState('checking')
   const [view, setView] = useState<View>('goals')
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [goals, setGoals] = useState<GoalSummary[]>([])
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
   const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null)
@@ -98,13 +128,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [formError, setFormError] = useState('')
 
-  const [goalForm, setGoalForm] = useState<GoalForm>({
-    title: '',
-    description: '',
-    totalDays: '90',
-    dailyTargetHours: '2',
-    dailyTargetMinutes: '0',
-  })
+  const [goalForm, setGoalForm] = useState<GoalForm>(() => createDefaultGoalForm(settings))
 
   const [sessionState, setSessionState] = useState<SessionState>('idle')
   const [sessionStartedAt, setSessionStartedAt] = useState('')
@@ -128,6 +152,10 @@ function App() {
   useEffect(() => {
     loadInitialData()
   }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
+  }, [settings])
 
   useEffect(() => {
     if (sessionState !== 'running' || !goalDetail) {
@@ -251,13 +279,7 @@ function App() {
 
       const createdGoal = (await response.json()) as GoalSummary
       setGoals((currentGoals) => [createdGoal, ...currentGoals])
-      setGoalForm({
-        title: '',
-        description: '',
-        totalDays: '90',
-        dailyTargetHours: '2',
-        dailyTargetMinutes: '0',
-      })
+      setGoalForm(createDefaultGoalForm(settings))
       setView('goals')
       await openGoal(createdGoal.id)
       await loadStats()
@@ -379,11 +401,13 @@ function App() {
       return
     }
 
-    const confirmed = window.confirm(
-      `Delete "${goalDetail.title}"? All saved sessions for this goal will also be deleted.`,
-    )
-    if (!confirmed) {
-      return
+    if (settings.confirmGoalDelete) {
+      const confirmed = window.confirm(
+        `Delete "${goalDetail.title}"? All saved sessions for this goal will also be deleted.`,
+      )
+      if (!confirmed) {
+        return
+      }
     }
 
     const response = await fetch(`/api/goals/${goalDetail.id}`, {
@@ -479,14 +503,22 @@ function App() {
   }
 
   return (
-    <main className="page-shell">
+    <main
+      className={[
+        'page-shell',
+        `theme-${settings.theme}`,
+        `accent-${settings.accent}`,
+        `font-${settings.fontSize}`,
+        settings.reducedEffects ? 'effects-reduced' : '',
+      ].filter(Boolean).join(' ')}
+    >
       <section className="phone-shell" aria-label="Progress Tracker">
         <div className="screen-content">
           <header className="top-bar">
             <button
-              className="icon-button"
+              className={`icon-button ${selectedGoalId ? 'icon-button--back' : 'icon-button--menu'}`}
               type="button"
-              aria-label={selectedGoalId ? 'Back to goals' : 'Open menu'}
+              aria-label={selectedGoalId ? 'Back to goals' : 'Open settings'}
               onClick={() => {
                 if (selectedGoalId) {
                   setSelectedGoalId(null)
@@ -494,11 +526,21 @@ function App() {
                   setIsEditingGoal(false)
                   setEditingSessionId(null)
                   resetSession()
+                  return
                 }
+
+                setSettingsOpen(true)
               }}
             >
-              <span />
-              <span />
+              {selectedGoalId ? (
+                <BackIcon />
+              ) : (
+                <>
+                  <span />
+                  <span />
+                  <span />
+                </>
+              )}
             </button>
             <p>{screenTitle}</p>
             <span
@@ -511,7 +553,10 @@ function App() {
             <GoalsScreen
               goals={goals}
               isLoading={isLoading}
-              onCreate={() => setView('create')}
+              onCreate={() => {
+                setGoalForm(createDefaultGoalForm(settings))
+                setView('create')
+              }}
               onOpenGoal={openGoal}
             />
           )}
@@ -581,6 +626,7 @@ function App() {
             className={view === 'create' ? 'is-active' : ''}
             type="button"
             onClick={() => {
+              setGoalForm(createDefaultGoalForm(settings))
               setView('create')
               setSelectedGoalId(null)
               setGoalDetail(null)
@@ -620,8 +666,193 @@ function App() {
             onClose={closeFinishModal}
           />
         )}
+
+        <SettingsDrawer
+          isOpen={settingsOpen}
+          settings={settings}
+          onClose={() => setSettingsOpen(false)}
+          onChange={(nextSettings) => setSettings((current) => ({ ...current, ...nextSettings }))}
+        />
       </section>
     </main>
+  )
+}
+
+function SettingsDrawer({
+  isOpen,
+  settings,
+  onClose,
+  onChange,
+}: {
+  isOpen: boolean
+  settings: AppSettings
+  onClose: () => void
+  onChange: (settings: Partial<AppSettings>) => void
+}) {
+  if (!isOpen) {
+    return null
+  }
+
+  return (
+    <div className="drawer-backdrop" onClick={onClose}>
+      <aside
+        className="settings-drawer"
+        aria-label="Settings"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="settings-drawer__header">
+          <div>
+            <p>Settings</p>
+            <span>Personalize the tracker</span>
+          </div>
+          <button className="icon-button icon-button--close" type="button" aria-label="Close settings" onClick={onClose}>
+            <span />
+            <span />
+          </button>
+        </div>
+
+        <SettingsGroup title="Appearance">
+          <label>
+            Theme
+            <select
+              value={settings.theme}
+              onChange={(event) => onChange({ theme: event.target.value as ThemeMode })}
+            >
+              <option value="midnight">Midnight</option>
+              <option value="graphite">Graphite</option>
+              <option value="contrast">High contrast</option>
+            </select>
+          </label>
+
+          <div className="settings-field">
+            <span>Accent color</span>
+            <div className="swatch-grid" role="list" aria-label="Accent color">
+              {(['cyan', 'purple', 'orange', 'green'] as AccentColor[]).map((accent) => (
+                <button
+                  className={`swatch-button swatch-button--${accent} ${settings.accent === accent ? 'is-selected' : ''}`}
+                  type="button"
+                  key={accent}
+                  aria-label={accent}
+                  onClick={() => onChange({ accent })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <label>
+            Font size
+            <select
+              value={settings.fontSize}
+              onChange={(event) => onChange({ fontSize: event.target.value as FontSize })}
+            >
+              <option value="compact">Compact</option>
+              <option value="default">Default</option>
+              <option value="large">Large</option>
+            </select>
+          </label>
+
+          <ToggleRow
+            label="Reduced glow"
+            checked={settings.reducedEffects}
+            onChange={(checked) => onChange({ reducedEffects: checked })}
+          />
+        </SettingsGroup>
+
+        <SettingsGroup title="Language">
+          <label>
+            App language
+            <select
+              value={settings.language}
+              onChange={(event) => onChange({ language: event.target.value as AppLanguage })}
+            >
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+            </select>
+          </label>
+          <p className="settings-note">The selected language is saved. Full interface translation will be connected in a separate step.</p>
+        </SettingsGroup>
+
+        <SettingsGroup title="Goals">
+          <label>
+            Default duration, days
+            <input
+              type="number"
+              min="1"
+              value={settings.defaultGoalDays}
+              onChange={(event) => onChange({ defaultGoalDays: event.target.value })}
+            />
+          </label>
+
+          <div className="form-row form-row--target">
+            <label>
+              Default hours
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={settings.defaultTargetHours}
+                onChange={(event) => onChange({ defaultTargetHours: event.target.value })}
+              />
+            </label>
+            <label>
+              Minutes
+              <input
+                type="number"
+                min="0"
+                max="59"
+                step="5"
+                value={settings.defaultTargetMinutes}
+                onChange={(event) => onChange({ defaultTargetMinutes: event.target.value })}
+              />
+            </label>
+          </div>
+
+          <ToggleRow
+            label="Confirm goal deletion"
+            checked={settings.confirmGoalDelete}
+            onChange={(checked) => onChange({ confirmGoalDelete: checked })}
+          />
+        </SettingsGroup>
+
+        <SettingsGroup title="About">
+          <div className="about-list">
+            <p><span>Product</span><strong>Progress Tracker</strong></p>
+            <p><span>Focus</span><strong>Goal-based learning</strong></p>
+            <p><span>Stack</span><strong>Go, SQLite, React, TypeScript</strong></p>
+          </div>
+        </SettingsGroup>
+      </aside>
+    </div>
+  )
+}
+
+function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="settings-group">
+      <h2>{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className="toggle-row">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
   )
 }
 
@@ -1321,6 +1552,33 @@ function goalToForm(goal: GoalSummary): GoalForm {
   }
 }
 
+function createDefaultGoalForm(settings: AppSettings): GoalForm {
+  return {
+    title: '',
+    description: '',
+    totalDays: settings.defaultGoalDays || defaultSettings.defaultGoalDays,
+    dailyTargetHours: settings.defaultTargetHours || defaultSettings.defaultTargetHours,
+    dailyTargetMinutes: settings.defaultTargetMinutes || defaultSettings.defaultTargetMinutes,
+  }
+}
+
+function loadSettings(): AppSettings {
+  try {
+    const savedSettings = window.localStorage.getItem(settingsStorageKey)
+
+    if (!savedSettings) {
+      return defaultSettings
+    }
+
+    return {
+      ...defaultSettings,
+      ...(JSON.parse(savedSettings) as Partial<AppSettings>),
+    }
+  } catch {
+    return defaultSettings
+  }
+}
+
 function formatTimer(seconds: number) {
   const normalizedSeconds = Math.floor(seconds)
   const hours = Math.floor(normalizedSeconds / 3600)
@@ -1378,6 +1636,14 @@ function ChartIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M5 19V9M12 19V5M19 19v-7" />
+    </svg>
+  )
+}
+
+function BackIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M15 6l-6 6 6 6" />
     </svg>
   )
 }

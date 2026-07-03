@@ -4,6 +4,8 @@
   --bg: #03070b;
   --muted: #7f9299;
   --accent: #19f7e8;
+  --accent-secondary: #3fc9ff;
+  --accent-rgb: 25, 247, 232;
 
   --sans: Inter, ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
 
@@ -36,7 +38,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
