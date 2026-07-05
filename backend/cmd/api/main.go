@@ -60,8 +60,9 @@ type Session struct {
 
 type GoalDetail struct {
 	GoalSummary
-	TodayRemainingMinutes int       `json:"todayRemainingMinutes"`
-	RecentSessions        []Session `json:"recentSessions"`
+	TodayRemainingMinutes int         `json:"todayRemainingMinutes"`
+	RecentSessions        []Session   `json:"recentSessions"`
+	Calendar              []DailyStat `json:"calendar"`
 }
 
 type CreateGoalRequest struct {
@@ -99,11 +100,20 @@ type Stats struct {
 	TotalPracticeMinutes int                `json:"totalPracticeMinutes"`
 	CurrentStreak        int                `json:"currentStreak"`
 	LongestStreak        int                `json:"longestStreak"`
+	CompletedDays        int                `json:"completedDays"`
+	MissedDays           int                `json:"missedDays"`
+	CompletionRate       int                `json:"completionRate"`
+	WeeklyCompletionRate int                `json:"weeklyCompletionRate"`
+	PreviousWeekMinutes  int                `json:"previousWeekMinutes"`
+	WeekComparisonPct    int                `json:"weekComparisonPct"`
 	TodayMinutes         int                `json:"todayMinutes"`
 	DailyTargetMinutes   int                `json:"dailyTargetMinutes"`
 	Weekly               []DailyStat        `json:"weekly"`
+	Calendar             []DailyStat        `json:"calendar"`
 	MonthlyTotalMinutes  int                `json:"monthlyTotalMinutes"`
 	GoalDistribution     []GoalDistribution `json:"goalDistribution"`
+	GoalID               int                `json:"goalId"`
+	GoalTitle            string             `json:"goalTitle"`
 }
 
 type DailyStat struct {
@@ -129,6 +139,9 @@ func main() {
 	defer database.Close()
 
 	db = database
+	if err := refreshDailyProgressForAllGoals(); err != nil {
+		log.Fatal(err)
+	}
 
 	mux := http.NewServeMux()
 
@@ -208,6 +221,17 @@ func openDatabase() (*sql.DB, error) {
 			notes TEXT NOT NULL DEFAULT '',
 			tags TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
+			FOREIGN KEY(goal_id) REFERENCES goals(id)
+		);
+		`,
+		`
+		CREATE TABLE IF NOT EXISTS daily_progress (
+			goal_id INTEGER NOT NULL,
+			date TEXT NOT NULL,
+			total_minutes INTEGER NOT NULL DEFAULT 0,
+			target_minutes INTEGER NOT NULL,
+			is_completed INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY(goal_id, date),
 			FOREIGN KEY(goal_id) REFERENCES goals(id)
 		);
 		`,
@@ -356,6 +380,11 @@ func createGoalHandler(w http.ResponseWriter, r *http.Request) {
 		Status:             "active",
 	}
 
+	if err := refreshDailyProgressForGoal(goal); err != nil {
+		http.Error(w, "failed to initialize goal progress", http.StatusInternalServerError)
+		return
+	}
+
 	summary, err := buildGoalSummary(goal)
 	if err != nil {
 		http.Error(w, "failed to load created goal", http.StatusInternalServerError)
@@ -383,10 +412,17 @@ func goalDetailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	calendar, err := loadCalendarStats(goal.ID, 42)
+	if err != nil {
+		http.Error(w, "failed to load calendar", http.StatusInternalServerError)
+		return
+	}
+
 	detail := GoalDetail{
 		GoalSummary:           summary,
 		TodayRemainingMinutes: max(goal.DailyTargetMinutes-summary.TodayMinutes, 0),
 		RecentSessions:        sessions,
+		Calendar:              calendar,
 	}
 
 	writeJSON(w, detail, http.StatusOK)
@@ -433,6 +469,11 @@ func updateGoalHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := refreshDailyProgressForGoal(updatedGoal); err != nil {
+		http.Error(w, "failed to refresh goal progress", http.StatusInternalServerError)
+		return
+	}
+
 	summary, err := buildGoalSummary(updatedGoal)
 	if err != nil {
 		http.Error(w, "failed to load updated goal summary", http.StatusInternalServerError)
@@ -457,6 +498,11 @@ func deleteGoalHandler(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := tx.Exec(`DELETE FROM sessions WHERE goal_id = ?`, goal.ID); err != nil {
 		http.Error(w, "failed to delete goal sessions", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := tx.Exec(`DELETE FROM daily_progress WHERE goal_id = ?`, goal.ID); err != nil {
+		http.Error(w, "failed to delete goal progress", http.StatusInternalServerError)
 		return
 	}
 
@@ -517,6 +563,11 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if err := refreshDailyProgressForGoal(goal); err != nil {
+			http.Error(w, "failed to refresh daily progress", http.StatusInternalServerError)
+			return
+		}
+
 		writeJSON(w, session, http.StatusOK)
 		return
 	}
@@ -548,6 +599,11 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 		Notes:           request.Notes,
 		Tags:            cleanTags(request.Tags),
 		CreatedAt:       createdAt,
+	}
+
+	if err := refreshDailyProgressForGoal(goal); err != nil {
+		http.Error(w, "failed to refresh daily progress", http.StatusInternalServerError)
+		return
 	}
 
 	writeJSON(w, session, http.StatusCreated)
@@ -626,6 +682,11 @@ func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := refreshDailyProgressForGoal(goal); err != nil {
+		http.Error(w, "failed to refresh daily progress", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -636,14 +697,30 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	totalSessions, totalMinutes, err := loadSessionTotals()
+	goalID, err := optionalGoalID(r)
+	if err != nil {
+		http.Error(w, "invalid goal id", http.StatusBadRequest)
+		return
+	}
+
+	if goalID != 0 {
+		if _, err := loadGoal(goalID); err == sql.ErrNoRows {
+			http.Error(w, "goal not found", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, "failed to load goal", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	totalSessions, totalMinutes, err := loadSessionTotals(goalID)
 	if err != nil {
 		http.Error(w, "failed to load stats", http.StatusInternalServerError)
 		return
 	}
 
 	today := todayString()
-	todayMinutes, err := loadMinutesForDate(today)
+	todayMinutes, err := loadMinutesForDate(today, goalID)
 	if err != nil {
 		http.Error(w, "failed to load today's stats", http.StatusInternalServerError)
 		return
@@ -652,7 +729,16 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	dailyTarget := 0
 	currentStreak := 0
 	longestStreak := 0
+	goalTitle := ""
 	for _, goal := range goals {
+		if goalID != 0 && goal.ID != goalID {
+			continue
+		}
+
+		if goalID == goal.ID {
+			goalTitle = goal.Title
+		}
+
 		if goal.Status == "active" {
 			dailyTarget += goal.DailyTargetMinutes
 		}
@@ -667,21 +753,55 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		longestStreak = max(longestStreak, longest)
 	}
 
-	weekly, err := buildWeeklyStats(dailyTarget)
+	weekly, err := buildWeeklyStats(dailyTarget, goalID)
 	if err != nil {
 		http.Error(w, "failed to load weekly stats", http.StatusInternalServerError)
 		return
 	}
 
-	monthlyTotal, err := loadMonthlyTotal()
+	completedDays, missedDays, completionRate, err := loadCompletionSummary(goalID, "", "")
+	if err != nil {
+		http.Error(w, "failed to load completion stats", http.StatusInternalServerError)
+		return
+	}
+
+	weekStart := dateOnly(time.Now()).AddDate(0, 0, -6).Format(time.DateOnly)
+	weekEnd := todayString()
+	_, _, weeklyCompletionRate, err := loadCompletionSummary(goalID, weekStart, weekEnd)
+	if err != nil {
+		http.Error(w, "failed to load weekly completion stats", http.StatusInternalServerError)
+		return
+	}
+
+	currentWeekMinutes, err := loadMinutesBetween(weekStart, weekEnd, goalID)
+	if err != nil {
+		http.Error(w, "failed to load current week stats", http.StatusInternalServerError)
+		return
+	}
+
+	previousWeekStart := dateOnly(time.Now()).AddDate(0, 0, -13).Format(time.DateOnly)
+	previousWeekEnd := dateOnly(time.Now()).AddDate(0, 0, -7).Format(time.DateOnly)
+	previousWeekMinutes, err := loadMinutesBetween(previousWeekStart, previousWeekEnd, goalID)
+	if err != nil {
+		http.Error(w, "failed to load previous week stats", http.StatusInternalServerError)
+		return
+	}
+
+	monthlyTotal, err := loadMonthlyTotal(goalID)
 	if err != nil {
 		http.Error(w, "failed to load monthly stats", http.StatusInternalServerError)
 		return
 	}
 
-	distribution, err := loadGoalDistribution(totalMinutes)
+	distribution, err := loadGoalDistribution(totalMinutes, goalID)
 	if err != nil {
 		http.Error(w, "failed to load distribution", http.StatusInternalServerError)
+		return
+	}
+
+	calendar, err := loadCalendarStats(goalID, 42)
+	if err != nil {
+		http.Error(w, "failed to load calendar stats", http.StatusInternalServerError)
 		return
 	}
 
@@ -690,11 +810,20 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		TotalPracticeMinutes: totalMinutes,
 		CurrentStreak:        currentStreak,
 		LongestStreak:        longestStreak,
+		CompletedDays:        completedDays,
+		MissedDays:           missedDays,
+		CompletionRate:       completionRate,
+		WeeklyCompletionRate: weeklyCompletionRate,
+		PreviousWeekMinutes:  previousWeekMinutes,
+		WeekComparisonPct:    signedPercentChange(currentWeekMinutes, previousWeekMinutes),
 		TodayMinutes:         todayMinutes,
 		DailyTargetMinutes:   dailyTarget,
 		Weekly:               weekly,
+		Calendar:             calendar,
 		MonthlyTotalMinutes:  monthlyTotal,
 		GoalDistribution:     distribution,
+		GoalID:               goalID,
+		GoalTitle:            goalTitle,
 	}
 
 	writeJSON(w, stats, http.StatusOK)
@@ -728,6 +857,23 @@ func sessionIDFromRequest(w http.ResponseWriter, r *http.Request) (int, bool) {
 	}
 
 	return id, true
+}
+
+func optionalGoalID(r *http.Request) (int, error) {
+	value := r.URL.Query().Get("goalId")
+	if value == "" {
+		return 0, nil
+	}
+
+	goalID, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	if goalID <= 0 {
+		return 0, strconv.ErrSyntax
+	}
+
+	return goalID, nil
 }
 
 func loadGoals() ([]Goal, error) {
@@ -909,55 +1055,119 @@ func scanSession(scanner sessionScanner) (Session, error) {
 	return session, nil
 }
 
-func loadGoalMinutesForDate(goalID int, date string) (int, error) {
+func refreshDailyProgressForAllGoals() error {
+	goals, err := loadGoals()
+	if err != nil {
+		return err
+	}
+
+	for _, goal := range goals {
+		if err := refreshDailyProgressForGoal(goal); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func refreshDailyProgressForGoal(goal Goal) error {
 	rows, err := db.Query(`
 		SELECT ended_at, duration_minutes
 		FROM sessions
 		WHERE goal_id = ?
-	`, goalID)
+	`, goal.ID)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer rows.Close()
 
-	minutes := 0
+	dayMinutes := map[string]int{}
 	for rows.Next() {
 		var endedAt string
 		var durationMinutes int
 		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
-			return 0, err
+			return err
 		}
-		if sessionDateString(endedAt) == date {
-			minutes += durationMinutes
-		}
+		dayMinutes[sessionDateString(endedAt)] += durationMinutes
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 
-	return minutes, rows.Err()
-}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-func loadMinutesForDate(date string) (int, error) {
-	rows, err := db.Query(`
-		SELECT ended_at, duration_minutes
-		FROM sessions
+	if _, err := tx.Exec(`DELETE FROM daily_progress WHERE goal_id = ?`, goal.ID); err != nil {
+		return err
+	}
+
+	start := parseDateOnlyOrToday(goal.StartDate)
+	today := dateOnly(time.Now())
+	end := start.AddDate(0, 0, max(goal.TotalDays-1, 0))
+	if end.After(today) {
+		end = today
+	}
+	if start.After(end) {
+		return tx.Commit()
+	}
+
+	statement, err := tx.Prepare(`
+		INSERT INTO daily_progress (
+			goal_id, date, total_minutes, target_minutes, is_completed
+		)
+		VALUES (?, ?, ?, ?, ?)
 	`)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	defer rows.Close()
+	defer statement.Close()
 
-	minutes := 0
-	for rows.Next() {
-		var endedAt string
-		var durationMinutes int
-		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
-			return 0, err
+	for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+		date := cursor.Format(time.DateOnly)
+		minutes := dayMinutes[date]
+		isCompleted := 0
+		if goal.DailyTargetMinutes > 0 && minutes >= goal.DailyTargetMinutes {
+			isCompleted = 1
 		}
-		if sessionDateString(endedAt) == date {
-			minutes += durationMinutes
+		if _, err := statement.Exec(goal.ID, date, minutes, goal.DailyTargetMinutes, isCompleted); err != nil {
+			return err
 		}
 	}
 
-	return minutes, rows.Err()
+	return tx.Commit()
+}
+
+func loadGoalMinutesForDate(goalID int, date string) (int, error) {
+	var minutes int
+	err := db.QueryRow(`
+		SELECT COALESCE(total_minutes, 0)
+		FROM daily_progress
+		WHERE goal_id = ? AND date = ?
+	`, goalID, date).Scan(&minutes)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return minutes, err
+}
+
+func loadMinutesForDate(date string, goalID int) (int, error) {
+	var minutes int
+	query := `
+		SELECT COALESCE(SUM(total_minutes), 0)
+		FROM daily_progress
+		WHERE date = ?
+	`
+	args := []any{date}
+	if goalID != 0 {
+		query += ` AND goal_id = ?`
+		args = append(args, goalID)
+	}
+
+	err := db.QueryRow(query, args...).Scan(&minutes)
+	return minutes, err
 }
 
 func loadGoalTotalMinutes(goalID int) (int, error) {
@@ -970,13 +1180,20 @@ func loadGoalTotalMinutes(goalID int) (int, error) {
 	return minutes, err
 }
 
-func loadSessionTotals() (int, int, error) {
+func loadSessionTotals(goalID int) (int, int, error) {
 	var sessions int
 	var minutes int
-	err := db.QueryRow(`
+	query := `
 		SELECT COUNT(*), COALESCE(SUM(duration_minutes), 0)
 		FROM sessions
-	`).Scan(&sessions, &minutes)
+	`
+	args := []any{}
+	if goalID != 0 {
+		query += ` WHERE goal_id = ?`
+		args = append(args, goalID)
+	}
+
+	err := db.QueryRow(query, args...).Scan(&sessions, &minutes)
 	return sessions, minutes, err
 }
 
@@ -987,8 +1204,8 @@ func calculateGoalStreaks(goal Goal) (int, int, error) {
 
 func calculateGoalProgress(goal Goal) (int, int, int, error) {
 	rows, err := db.Query(`
-		SELECT ended_at, duration_minutes
-		FROM sessions
+		SELECT date, is_completed
+		FROM daily_progress
 		WHERE goal_id = ?
 	`, goal.ID)
 	if err != nil {
@@ -996,33 +1213,31 @@ func calculateGoalProgress(goal Goal) (int, int, int, error) {
 	}
 	defer rows.Close()
 
-	dayMinutes := map[string]int{}
+	completedDays := map[string]bool{}
+	completedDaysCount := 0
 	for rows.Next() {
-		var endedAt string
-		var durationMinutes int
-		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
+		var date string
+		var isCompleted int
+		if err := rows.Scan(&date, &isCompleted); err != nil {
 			return 0, 0, 0, err
 		}
 
-		dayMinutes[sessionDateString(endedAt)] += durationMinutes
+		completed := isCompleted == 1
+		completedDays[date] = completed
+		if completed {
+			completedDaysCount++
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return 0, 0, 0, err
 	}
 
-	completedDays := map[string]bool{}
-	completedDaysCount := 0
-	for date, minutes := range dayMinutes {
-		isCompleted := minutes >= goal.DailyTargetMinutes
-		completedDays[date] = isCompleted
-		if isCompleted {
-			completedDaysCount++
-		}
-	}
-
 	current := 0
 	cursor := time.Now()
+	if !completedDays[cursor.Format(time.DateOnly)] {
+		cursor = cursor.AddDate(0, 0, -1)
+	}
 	for {
 		date := cursor.Format(time.DateOnly)
 		if !completedDays[date] {
@@ -1047,7 +1262,7 @@ func calculateGoalProgress(goal Goal) (int, int, int, error) {
 	return current, longest, completedDaysCount, nil
 }
 
-func buildWeeklyStats(dailyTarget int) ([]DailyStat, error) {
+func buildWeeklyStats(dailyTarget int, goalID int) ([]DailyStat, error) {
 	stats := make([]DailyStat, 0, 7)
 	today := time.Now()
 	start := today.AddDate(0, 0, -6)
@@ -1055,7 +1270,7 @@ func buildWeeklyStats(dailyTarget int) ([]DailyStat, error) {
 	for day := 0; day < 7; day++ {
 		date := start.AddDate(0, 0, day)
 		dateString := date.Format(time.DateOnly)
-		minutes, err := loadMinutesForDate(dateString)
+		minutes, err := loadMinutesForDate(dateString, goalID)
 		if err != nil {
 			return nil, err
 		}
@@ -1072,45 +1287,150 @@ func buildWeeklyStats(dailyTarget int) ([]DailyStat, error) {
 	return stats, nil
 }
 
-func loadMonthlyTotal() (int, error) {
+func loadCalendarStats(goalID int, days int) ([]DailyStat, error) {
+	if days <= 0 {
+		days = 42
+	}
+
+	today := dateOnly(time.Now())
+	start := today.AddDate(0, 0, -(days - 1))
+	stats := make([]DailyStat, 0, days)
+
+	for day := 0; day < days; day++ {
+		date := start.AddDate(0, 0, day)
+		dateString := date.Format(time.DateOnly)
+		minutes, target, completed, err := loadProgressForDate(dateString, goalID)
+		if err != nil {
+			return nil, err
+		}
+
+		stats = append(stats, DailyStat{
+			Date:          dateString,
+			Label:         weekdayLabel(date),
+			Minutes:       minutes,
+			TargetMinutes: target,
+			IsCompleted:   completed,
+		})
+	}
+
+	return stats, nil
+}
+
+func loadProgressForDate(date string, goalID int) (int, int, bool, error) {
+	var minutes int
+	var target int
+	var completedCount int
+	var totalCount int
+
+	query := `
+		SELECT
+			COALESCE(SUM(total_minutes), 0),
+			COALESCE(SUM(target_minutes), 0),
+			COALESCE(SUM(is_completed), 0),
+			COUNT(*)
+		FROM daily_progress
+		WHERE date = ?
+	`
+	args := []any{date}
+	if goalID != 0 {
+		query += ` AND goal_id = ?`
+		args = append(args, goalID)
+	}
+
+	err := db.QueryRow(query, args...).Scan(&minutes, &target, &completedCount, &totalCount)
+	if err != nil {
+		return 0, 0, false, err
+	}
+
+	return minutes, target, totalCount > 0 && completedCount == totalCount, nil
+}
+
+func loadCompletionSummary(goalID int, startDate string, endDate string) (int, int, int, error) {
+	var completed int
+	var total int
+
+	query := `
+		SELECT COALESCE(SUM(is_completed), 0), COUNT(*)
+		FROM daily_progress
+		WHERE (date < ? OR is_completed = 1)
+	`
+	args := []any{todayString()}
+	if goalID != 0 {
+		query += ` AND goal_id = ?`
+		args = append(args, goalID)
+	}
+	if startDate != "" {
+		query += ` AND date >= ?`
+		args = append(args, startDate)
+	}
+	if endDate != "" {
+		query += ` AND date <= ?`
+		args = append(args, endDate)
+	}
+
+	if err := db.QueryRow(query, args...).Scan(&completed, &total); err != nil {
+		return 0, 0, 0, err
+	}
+
+	missed := max(total-completed, 0)
+	return completed, missed, percent(completed, total), nil
+}
+
+func loadMinutesBetween(startDate string, endDate string, goalID int) (int, error) {
+	var minutes int
+	query := `
+		SELECT COALESCE(SUM(total_minutes), 0)
+		FROM daily_progress
+		WHERE date >= ? AND date <= ?
+	`
+	args := []any{startDate, endDate}
+	if goalID != 0 {
+		query += ` AND goal_id = ?`
+		args = append(args, goalID)
+	}
+
+	err := db.QueryRow(query, args...).Scan(&minutes)
+	return minutes, err
+}
+
+func loadMonthlyTotal(goalID int) (int, error) {
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format(time.DateOnly)
 	nextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location()).Format(time.DateOnly)
 
-	rows, err := db.Query(`
-		SELECT ended_at, duration_minutes
-		FROM sessions
-	`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	minutes := 0
-	for rows.Next() {
-		var endedAt string
-		var durationMinutes int
-		if err := rows.Scan(&endedAt, &durationMinutes); err != nil {
-			return 0, err
-		}
-
-		date := sessionDateString(endedAt)
-		if date >= monthStart && date < nextMonth {
-			minutes += durationMinutes
-		}
+	var minutes int
+	query := `
+		SELECT COALESCE(SUM(total_minutes), 0)
+		FROM daily_progress
+		WHERE date >= ? AND date < ?
+	`
+	args := []any{monthStart, nextMonth}
+	if goalID != 0 {
+		query += ` AND goal_id = ?`
+		args = append(args, goalID)
 	}
 
-	return minutes, rows.Err()
+	err := db.QueryRow(query, args...).Scan(&minutes)
+	return minutes, err
 }
 
-func loadGoalDistribution(totalMinutes int) ([]GoalDistribution, error) {
-	rows, err := db.Query(`
-		SELECT goals.id, goals.title, COALESCE(SUM(sessions.duration_minutes), 0)
+func loadGoalDistribution(totalMinutes int, goalID int) ([]GoalDistribution, error) {
+	query := `
+		SELECT goals.id, goals.title, COALESCE(SUM(daily_progress.total_minutes), 0)
 		FROM goals
-		LEFT JOIN sessions ON sessions.goal_id = goals.id
+		LEFT JOIN daily_progress ON daily_progress.goal_id = goals.id
+	`
+	args := []any{}
+	if goalID != 0 {
+		query += ` WHERE goals.id = ?`
+		args = append(args, goalID)
+	}
+	query += `
 		GROUP BY goals.id, goals.title
-		ORDER BY COALESCE(SUM(sessions.duration_minutes), 0) DESC
-	`)
+		ORDER BY COALESCE(SUM(daily_progress.total_minutes), 0) DESC
+	`
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1252,6 +1572,19 @@ func parseDateOrToday(value string) time.Time {
 	return date
 }
 
+func parseDateOnlyOrToday(value string) time.Time {
+	date, err := time.ParseInLocation(time.DateOnly, value, time.Local)
+	if err != nil {
+		return dateOnly(time.Now())
+	}
+	return date
+}
+
+func dateOnly(value time.Time) time.Time {
+	local := value.In(time.Local)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+}
+
 func getGoalDay(startDate string, durationDays int) int {
 	start := parseDateOrToday(startDate)
 	today := time.Now()
@@ -1267,6 +1600,17 @@ func percent(value int, total int) int {
 		return 0
 	}
 	return min(int(math.Round((float64(value)/float64(total))*100)), 100)
+}
+
+func signedPercentChange(current int, previous int) int {
+	if previous <= 0 {
+		if current > 0 {
+			return 100
+		}
+		return 0
+	}
+
+	return int(math.Round(((float64(current) - float64(previous)) / float64(previous)) * 100))
 }
 
 func weekdayLabel(date time.Time) string {

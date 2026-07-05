@@ -3,7 +3,7 @@ import './App.css'
 
 type View = 'goals' | 'create' | 'stats'
 type SessionState = 'idle' | 'running' | 'paused'
-type ThemeMode = 'midnight' | 'graphite' | 'contrast'
+type ThemeMode = 'dark' | 'light'
 type AccentColor = 'cyan' | 'purple' | 'orange' | 'green'
 type FontSize = 'compact' | 'default' | 'large'
 type AppLanguage = 'en' | 'ru'
@@ -40,6 +40,7 @@ type Session = {
 type GoalDetail = GoalSummary & {
   todayRemainingMinutes: number
   recentSessions: Session[]
+  calendar: WeeklyStat[]
 }
 
 type WeeklyStat = {
@@ -62,11 +63,20 @@ type AppStats = {
   totalPracticeMinutes: number
   currentStreak: number
   longestStreak: number
+  completedDays: number
+  missedDays: number
+  completionRate: number
+  weeklyCompletionRate: number
+  previousWeekMinutes: number
+  weekComparisonPct: number
   todayMinutes: number
   dailyTargetMinutes: number
   weekly: WeeklyStat[]
+  calendar: WeeklyStat[]
   monthlyTotalMinutes: number
   goalDistribution: GoalDistribution[]
+  goalId: number
+  goalTitle: string
 }
 
 type GoalForm = {
@@ -94,18 +104,27 @@ const defaultStats: AppStats = {
   totalPracticeMinutes: 0,
   currentStreak: 0,
   longestStreak: 0,
+  completedDays: 0,
+  missedDays: 0,
+  completionRate: 0,
+  weeklyCompletionRate: 0,
+  previousWeekMinutes: 0,
+  weekComparisonPct: 0,
   todayMinutes: 0,
   dailyTargetMinutes: 0,
   weekly: [],
+  calendar: [],
   monthlyTotalMinutes: 0,
   goalDistribution: [],
+  goalId: 0,
+  goalTitle: '',
 }
 
 const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
 const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 const settingsStorageKey = 'progress-tracker-settings'
 const defaultSettings: AppSettings = {
-  theme: 'midnight',
+  theme: 'dark',
   accent: 'cyan',
   fontSize: 'default',
   reducedEffects: false,
@@ -116,15 +135,260 @@ const defaultSettings: AppSettings = {
   confirmGoalDelete: true,
 }
 
+const translations = {
+  en: {
+    screenNewGoal: 'New goal',
+    screenStats: 'Stats',
+    screenGoal: 'Goal',
+    screenGoals: 'Goals',
+    backToGoals: 'Back to goals',
+    openSettings: 'Open settings',
+    mainNavigation: 'Main navigation',
+    navGoals: 'Goals',
+    navCreateGoal: 'Create goal',
+    navStats: 'Stats',
+    loadingGoals: 'Loading goals...',
+    emptyGoalTitle: 'Create your first goal',
+    emptyGoalText: 'Build long-term momentum: choose a focus, set a daily target, and track real practice sessions with the timer.',
+    createGoal: 'Create goal',
+    myGoals: 'My goals',
+    activeGoals: 'active',
+    goalFallbackDescription: 'Long-term learning goal',
+    streak: 'Streak',
+    today: 'Today',
+    day: 'Day',
+    of: 'of',
+    total: 'total',
+    createGoalTitle: 'Create goal',
+    longTermFocus: 'long-term focus',
+    title: 'Title',
+    description: 'Description',
+    days: 'Days',
+    dailyTargetHours: 'Daily target hours',
+    minutes: 'Minutes',
+    createHint: 'The goal starts today automatically. Streaks are counted daily.',
+    editGoal: 'Edit goal',
+    adjustTarget: 'adjust target',
+    cancel: 'Cancel',
+    saveChanges: 'Save changes',
+    dayStreak: 'day streak',
+    goalCompleted: 'Goal completed',
+    leftToday: 'left today',
+    todayTarget: 'Today target',
+    practiced: 'practiced',
+    devTimer: 'Dev timer',
+    startSession: 'Start session',
+    sessionRunning: 'Session running',
+    paused: 'Paused',
+    pause: 'Pause',
+    resume: 'Resume',
+    finishSession: 'Finish session',
+    deleteGoal: 'Delete goal',
+    sessionCompleted: 'Session completed',
+    notes: 'Notes',
+    sessionNotesPlaceholder: 'What did you do, learn, or complete today?',
+    tags: 'Tags',
+    tagsPlaceholder: 'SQLite, HTTP, handlers',
+    back: 'Back',
+    saveSession: 'Save session',
+    sessions: 'Sessions',
+    practice: 'Practice',
+    currentStreak: 'Current streak',
+    longestStreak: 'Longest streak',
+    targetPercent: 'of target',
+    week: 'Week',
+    actualVsTarget: 'actual vs target',
+    month: 'Month',
+    emptyDistribution: 'Distribution will appear after your first session.',
+    allGoals: 'All goals',
+    selectedGoal: 'Selected goal',
+    calendar: 'Calendar',
+    completedDays: 'Completed days',
+    missedDays: 'Missed days',
+    completionRate: 'Completion rate',
+    weeklyCompletionRate: 'Weekly rate',
+    previousWeek: 'Previous week',
+    weekComparison: 'Week comparison',
+    completedDay: 'Completed',
+    partialDay: 'Partial',
+    missedDay: 'Missed',
+    history: 'History',
+    recent: 'recent',
+    emptyHistory: 'No sessions yet. Start the timer and save your result.',
+    edit: 'Edit',
+    delete: 'Delete',
+    save: 'Save',
+    settings: 'Settings',
+    settingsSubtitle: 'Personalize the tracker',
+    closeSettings: 'Close settings',
+    appearance: 'Appearance',
+    theme: 'Theme',
+    themeDark: 'Dark',
+    themeLight: 'Light',
+    accentColor: 'Accent color',
+    fontSize: 'Font size',
+    fontCompact: 'Compact',
+    fontDefault: 'Default',
+    fontLarge: 'Large',
+    reducedGlow: 'Reduced glow',
+    language: 'Language',
+    appLanguage: 'App language',
+    languageNote: 'The selected language is saved and applied to the interface.',
+    goals: 'Goals',
+    defaultDuration: 'Default duration, days',
+    defaultHours: 'Default hours',
+    confirmGoalDeletion: 'Confirm goal deletion',
+    about: 'About',
+    product: 'Product',
+    focus: 'Focus',
+    goalBasedLearning: 'Goal-based learning',
+    stack: 'Stack',
+    dailyTargetError: 'Daily target must be greater than 0',
+    createGoalError: 'Could not create goal',
+    updateGoalError: 'Could not update goal',
+    saveSessionError: 'Could not save session',
+    updateSessionError: 'Could not update session',
+    deleteGoalError: 'Could not delete goal',
+    deleteSessionConfirm: 'Delete session?',
+    todayCompleteAlert: 'Today target is already complete',
+    deleteGoalConfirmSuffix: 'All saved sessions for this goal will also be deleted.',
+    statusActive: 'active',
+    statusCompleted: 'completed',
+  },
+  ru: {
+    screenNewGoal: 'Новая цель',
+    screenStats: 'Статистика',
+    screenGoal: 'Цель',
+    screenGoals: 'Цели',
+    backToGoals: 'Назад к целям',
+    openSettings: 'Открыть настройки',
+    mainNavigation: 'Основная навигация',
+    navGoals: 'Цели',
+    navCreateGoal: 'Создать цель',
+    navStats: 'Статистика',
+    loadingGoals: 'Загрузка целей...',
+    emptyGoalTitle: 'Создайте первую цель',
+    emptyGoalText: 'Выберите фокус, задайте дневную норму и отслеживайте реальные занятия через таймер.',
+    createGoal: 'Создать цель',
+    myGoals: 'Мои цели',
+    activeGoals: 'активных',
+    goalFallbackDescription: 'Долгосрочная учебная цель',
+    streak: 'Стрик',
+    today: 'Сегодня',
+    day: 'День',
+    of: 'из',
+    total: 'всего',
+    createGoalTitle: 'Создание цели',
+    longTermFocus: 'долгосрочный фокус',
+    title: 'Название',
+    description: 'Описание',
+    days: 'Дни',
+    dailyTargetHours: 'Дневная норма, часы',
+    minutes: 'Минуты',
+    createHint: 'Цель начинается сегодня автоматически. Стрик считается по дням.',
+    editGoal: 'Редактировать цель',
+    adjustTarget: 'изменить цель',
+    cancel: 'Отмена',
+    saveChanges: 'Сохранить',
+    dayStreak: 'дней серии',
+    goalCompleted: 'Цель выполнена',
+    leftToday: 'осталось сегодня',
+    todayTarget: 'Дневная норма',
+    practiced: 'занятий',
+    devTimer: 'Dev timer',
+    startSession: 'Начать сессию',
+    sessionRunning: 'Сессия идет',
+    paused: 'Пауза',
+    pause: 'Пауза',
+    resume: 'Продолжить',
+    finishSession: 'Завершить',
+    deleteGoal: 'Удалить цель',
+    sessionCompleted: 'Сессия завершена',
+    notes: 'Заметки',
+    sessionNotesPlaceholder: 'Что вы сделали, изучили или завершили сегодня?',
+    tags: 'Теги',
+    tagsPlaceholder: 'SQLite, HTTP, handlers',
+    back: 'Назад',
+    saveSession: 'Сохранить сессию',
+    sessions: 'Сессии',
+    practice: 'Практика',
+    currentStreak: 'Текущая серия',
+    longestStreak: 'Лучшая серия',
+    targetPercent: 'от нормы',
+    week: 'Неделя',
+    actualVsTarget: 'факт против нормы',
+    month: 'Месяц',
+    emptyDistribution: 'Распределение появится после первой сессии.',
+    allGoals: 'Все цели',
+    selectedGoal: 'Выбранная цель',
+    calendar: 'Календарь',
+    completedDays: 'Выполненные дни',
+    missedDays: 'Пропущенные дни',
+    completionRate: 'Процент выполнения',
+    weeklyCompletionRate: 'Процент за неделю',
+    previousWeek: 'Прошлая неделя',
+    weekComparison: 'Сравнение недели',
+    completedDay: 'Выполнено',
+    partialDay: 'Частично',
+    missedDay: 'Пропущено',
+    history: 'История',
+    recent: 'последних',
+    emptyHistory: 'Сессий пока нет. Запустите таймер и сохраните результат.',
+    edit: 'Изменить',
+    delete: 'Удалить',
+    save: 'Сохранить',
+    settings: 'Настройки',
+    settingsSubtitle: 'Настройте трекер под себя',
+    closeSettings: 'Закрыть настройки',
+    appearance: 'Внешний вид',
+    theme: 'Тема',
+    themeDark: 'Темная',
+    themeLight: 'Светлая',
+    accentColor: 'Цвет акцента',
+    fontSize: 'Размер шрифта',
+    fontCompact: 'Компактный',
+    fontDefault: 'Обычный',
+    fontLarge: 'Крупный',
+    reducedGlow: 'Меньше свечения',
+    language: 'Язык',
+    appLanguage: 'Язык приложения',
+    languageNote: 'Выбранный язык сохраняется и применяется к интерфейсу.',
+    goals: 'Цели',
+    defaultDuration: 'Длительность по умолчанию, дни',
+    defaultHours: 'Часы по умолчанию',
+    confirmGoalDeletion: 'Подтверждать удаление цели',
+    about: 'О приложении',
+    product: 'Продукт',
+    focus: 'Фокус',
+    goalBasedLearning: 'Целевое обучение',
+    stack: 'Стек',
+    dailyTargetError: 'Дневная норма должна быть больше 0',
+    createGoalError: 'Не удалось создать цель',
+    updateGoalError: 'Не удалось обновить цель',
+    saveSessionError: 'Не удалось сохранить сессию',
+    updateSessionError: 'Не удалось обновить сессию',
+    deleteGoalError: 'Не удалось удалить цель',
+    deleteSessionConfirm: 'Удалить сессию?',
+    todayCompleteAlert: 'Дневная норма уже выполнена',
+    deleteGoalConfirmSuffix: 'Все сохраненные сессии этой цели также будут удалены.',
+    statusActive: 'активна',
+    statusCompleted: 'завершена',
+  },
+} as const
+
+type Copy = typeof translations[AppLanguage]
+
 function App() {
   const [backendStatus, setBackendStatus] = useState('checking')
   const [view, setView] = useState<View>('goals')
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
+  const copy = translations[settings.language]
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [goals, setGoals] = useState<GoalSummary[]>([])
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
   const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null)
   const [stats, setStats] = useState<AppStats>(defaultStats)
+  const [selectedStatsGoalId, setSelectedStatsGoalId] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [formError, setFormError] = useState('')
 
@@ -183,19 +447,19 @@ function App() {
 
   const screenTitle = useMemo(() => {
     if (view === 'create') {
-      return 'New goal'
+      return copy.screenNewGoal
     }
 
     if (view === 'stats') {
-      return 'Stats'
+      return copy.screenStats
     }
 
     if (selectedGoalId) {
-      return 'Goal'
+      return copy.screenGoal
     }
 
-    return 'Goals'
-  }, [selectedGoalId, view])
+    return copy.screenGoals
+  }, [copy, selectedGoalId, view])
 
   async function loadInitialData() {
     setIsLoading(true)
@@ -223,9 +487,10 @@ function App() {
     }
   }
 
-  async function loadStats() {
+  async function loadStats(goalId = selectedStatsGoalId) {
     try {
-      const response = await fetch('/api/stats')
+      const query = goalId ? `?goalId=${goalId}` : ''
+      const response = await fetch(`/api/stats${query}`)
       const data = (await response.json()) as AppStats
       setStats(data)
     } catch {
@@ -255,7 +520,7 @@ function App() {
       Number(goalForm.dailyTargetHours) * 60 + Number(goalForm.dailyTargetMinutes)
 
     if (dailyTargetMinutes <= 0) {
-      setFormError('Daily target must be greater than 0')
+      setFormError(copy.dailyTargetError)
       return
     }
 
@@ -284,7 +549,7 @@ function App() {
       await openGoal(createdGoal.id)
       await loadStats()
     } catch {
-      setFormError('Could not create goal')
+      setFormError(copy.createGoalError)
     }
   }
 
@@ -294,7 +559,7 @@ function App() {
     }
 
     if (goalDetail.todayMinutes >= goalDetail.dailyTargetMinutes) {
-      window.alert('Today target is already complete')
+      window.alert(copy.todayCompleteAlert)
       return
     }
 
@@ -339,7 +604,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setFormError('Could not save session')
+      setFormError(copy.saveSessionError)
       return
     }
 
@@ -368,7 +633,7 @@ function App() {
       Number(editGoalForm.dailyTargetHours) * 60 + Number(editGoalForm.dailyTargetMinutes)
 
     if (dailyTargetMinutes <= 0) {
-      setFormError('Daily target must be greater than 0')
+      setFormError(copy.dailyTargetError)
       return
     }
 
@@ -387,7 +652,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setFormError('Could not update goal')
+      setFormError(copy.updateGoalError)
       return
     }
 
@@ -403,7 +668,7 @@ function App() {
 
     if (settings.confirmGoalDelete) {
       const confirmed = window.confirm(
-        `Delete "${goalDetail.title}"? All saved sessions for this goal will also be deleted.`,
+        `${copy.deleteGoal} "${goalDetail.title}"? ${copy.deleteGoalConfirmSuffix}`,
       )
       if (!confirmed) {
         return
@@ -415,7 +680,7 @@ function App() {
     })
 
     if (!response.ok) {
-      window.alert('Could not delete goal')
+      window.alert(copy.deleteGoalError)
       return
     }
 
@@ -453,7 +718,7 @@ function App() {
     })
 
     if (!response.ok) {
-      window.alert('Could not update session')
+      window.alert(copy.updateSessionError)
       return
     }
 
@@ -466,7 +731,7 @@ function App() {
       return
     }
 
-    const confirmed = window.confirm(`Delete ${formatMinutes(session.durationMinutes)} session?`)
+    const confirmed = window.confirm(`${copy.deleteSessionConfirm} ${formatMinutes(session.durationMinutes)}`)
     if (!confirmed) {
       return
     }
@@ -518,7 +783,7 @@ function App() {
             <button
               className={`icon-button ${selectedGoalId ? 'icon-button--back' : 'icon-button--menu'}`}
               type="button"
-              aria-label={selectedGoalId ? 'Back to goals' : 'Open settings'}
+              aria-label={selectedGoalId ? copy.backToGoals : copy.openSettings}
               onClick={() => {
                 if (selectedGoalId) {
                   setSelectedGoalId(null)
@@ -553,6 +818,7 @@ function App() {
             <GoalsScreen
               goals={goals}
               isLoading={isLoading}
+              copy={copy}
               onCreate={() => {
                 setGoalForm(createDefaultGoalForm(settings))
                 setView('create')
@@ -564,6 +830,8 @@ function App() {
           {view === 'goals' && selectedGoalId && goalDetail && (
             <GoalDetailsScreen
               goal={goalDetail}
+              copy={copy}
+              language={settings.language}
               elapsedSeconds={elapsedSeconds}
               timerSpeed={timerSpeed}
               isEditingGoal={isEditingGoal}
@@ -599,15 +867,28 @@ function App() {
             <CreateGoalScreen
               form={goalForm}
               formError={formError}
+              copy={copy}
               onChange={setGoalForm}
               onSubmit={handleCreateGoal}
             />
           )}
 
-          {view === 'stats' && <StatsScreen stats={stats} />}
+          {view === 'stats' && (
+            <StatsScreen
+              stats={stats}
+              goals={goals}
+              selectedGoalId={selectedStatsGoalId}
+              copy={copy}
+              language={settings.language}
+              onGoalChange={(goalId) => {
+                setSelectedStatsGoalId(goalId)
+                void loadStats(goalId)
+              }}
+            />
+          )}
         </div>
 
-        <nav className="bottom-nav" aria-label="Main navigation">
+        <nav className="bottom-nav" aria-label={copy.mainNavigation}>
           <button
             className={view === 'goals' ? 'is-active' : ''}
             type="button"
@@ -618,7 +899,7 @@ function App() {
               setIsEditingGoal(false)
               setEditingSessionId(null)
             }}
-            aria-label="Goals"
+            aria-label={copy.navGoals}
           >
             <FlameIcon />
           </button>
@@ -633,7 +914,7 @@ function App() {
               setIsEditingGoal(false)
               setEditingSessionId(null)
             }}
-            aria-label="Create goal"
+            aria-label={copy.navCreateGoal}
           >
             <PlusIcon />
           </button>
@@ -646,8 +927,9 @@ function App() {
               setGoalDetail(null)
               setIsEditingGoal(false)
               setEditingSessionId(null)
+              void loadStats(selectedStatsGoalId)
             }}
-            aria-label="Stats"
+            aria-label={copy.navStats}
           >
             <ChartIcon />
           </button>
@@ -656,6 +938,7 @@ function App() {
         {finishModalOpen && goalDetail && (
           <FinishSessionModal
             goal={goalDetail}
+            copy={copy}
             elapsedSeconds={elapsedSeconds}
             notes={sessionNotes}
             tags={sessionTags}
@@ -670,6 +953,7 @@ function App() {
         <SettingsDrawer
           isOpen={settingsOpen}
           settings={settings}
+          copy={copy}
           onClose={() => setSettingsOpen(false)}
           onChange={(nextSettings) => setSettings((current) => ({ ...current, ...nextSettings }))}
         />
@@ -681,11 +965,13 @@ function App() {
 function SettingsDrawer({
   isOpen,
   settings,
+  copy,
   onClose,
   onChange,
 }: {
   isOpen: boolean
   settings: AppSettings
+  copy: Copy
   onClose: () => void
   onChange: (settings: Partial<AppSettings>) => void
 }) {
@@ -697,36 +983,35 @@ function SettingsDrawer({
     <div className="drawer-backdrop" onClick={onClose}>
       <aside
         className="settings-drawer"
-        aria-label="Settings"
+        aria-label={copy.settings}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="settings-drawer__header">
           <div>
-            <p>Settings</p>
-            <span>Personalize the tracker</span>
+            <p>{copy.settings}</p>
+            <span>{copy.settingsSubtitle}</span>
           </div>
-          <button className="icon-button icon-button--close" type="button" aria-label="Close settings" onClick={onClose}>
+          <button className="icon-button icon-button--close" type="button" aria-label={copy.closeSettings} onClick={onClose}>
             <span />
             <span />
           </button>
         </div>
 
-        <SettingsGroup title="Appearance">
+        <SettingsGroup title={copy.appearance}>
           <label>
-            Theme
+            {copy.theme}
             <select
               value={settings.theme}
               onChange={(event) => onChange({ theme: event.target.value as ThemeMode })}
             >
-              <option value="midnight">Midnight</option>
-              <option value="graphite">Graphite</option>
-              <option value="contrast">High contrast</option>
+              <option value="dark">{copy.themeDark}</option>
+              <option value="light">{copy.themeLight}</option>
             </select>
           </label>
 
           <div className="settings-field">
-            <span>Accent color</span>
-            <div className="swatch-grid" role="list" aria-label="Accent color">
+            <span>{copy.accentColor}</span>
+            <div className="swatch-grid" role="list" aria-label={copy.accentColor}>
               {(['cyan', 'purple', 'orange', 'green'] as AccentColor[]).map((accent) => (
                 <button
                   className={`swatch-button swatch-button--${accent} ${settings.accent === accent ? 'is-selected' : ''}`}
@@ -740,27 +1025,27 @@ function SettingsDrawer({
           </div>
 
           <label>
-            Font size
+            {copy.fontSize}
             <select
               value={settings.fontSize}
               onChange={(event) => onChange({ fontSize: event.target.value as FontSize })}
             >
-              <option value="compact">Compact</option>
-              <option value="default">Default</option>
-              <option value="large">Large</option>
+              <option value="compact">{copy.fontCompact}</option>
+              <option value="default">{copy.fontDefault}</option>
+              <option value="large">{copy.fontLarge}</option>
             </select>
           </label>
 
           <ToggleRow
-            label="Reduced glow"
+            label={copy.reducedGlow}
             checked={settings.reducedEffects}
             onChange={(checked) => onChange({ reducedEffects: checked })}
           />
         </SettingsGroup>
 
-        <SettingsGroup title="Language">
+        <SettingsGroup title={copy.language}>
           <label>
-            App language
+            {copy.appLanguage}
             <select
               value={settings.language}
               onChange={(event) => onChange({ language: event.target.value as AppLanguage })}
@@ -769,12 +1054,12 @@ function SettingsDrawer({
               <option value="ru">Русский</option>
             </select>
           </label>
-          <p className="settings-note">The selected language is saved. Full interface translation will be connected in a separate step.</p>
+          <p className="settings-note">{copy.languageNote}</p>
         </SettingsGroup>
 
-        <SettingsGroup title="Goals">
+        <SettingsGroup title={copy.goals}>
           <label>
-            Default duration, days
+            {copy.defaultDuration}
             <input
               type="number"
               min="1"
@@ -785,7 +1070,7 @@ function SettingsDrawer({
 
           <div className="form-row form-row--target">
             <label>
-              Default hours
+              {copy.defaultHours}
               <input
                 type="number"
                 min="0"
@@ -795,7 +1080,7 @@ function SettingsDrawer({
               />
             </label>
             <label>
-              Minutes
+              {copy.minutes}
               <input
                 type="number"
                 min="0"
@@ -808,17 +1093,17 @@ function SettingsDrawer({
           </div>
 
           <ToggleRow
-            label="Confirm goal deletion"
+            label={copy.confirmGoalDeletion}
             checked={settings.confirmGoalDelete}
             onChange={(checked) => onChange({ confirmGoalDelete: checked })}
           />
         </SettingsGroup>
 
-        <SettingsGroup title="About">
+        <SettingsGroup title={copy.about}>
           <div className="about-list">
-            <p><span>Product</span><strong>Progress Tracker</strong></p>
-            <p><span>Focus</span><strong>Goal-based learning</strong></p>
-            <p><span>Stack</span><strong>Go, SQLite, React, TypeScript</strong></p>
+            <p><span>{copy.product}</span><strong>Progress Tracker</strong></p>
+            <p><span>{copy.focus}</span><strong>{copy.goalBasedLearning}</strong></p>
+            <p><span>{copy.stack}</span><strong>Go, SQLite, React, TypeScript</strong></p>
           </div>
         </SettingsGroup>
       </aside>
@@ -859,16 +1144,18 @@ function ToggleRow({
 function GoalsScreen({
   goals,
   isLoading,
+  copy,
   onCreate,
   onOpenGoal,
 }: {
   goals: GoalSummary[]
   isLoading: boolean
+  copy: Copy
   onCreate: () => void
   onOpenGoal: (goalId: number) => void
 }) {
   if (isLoading) {
-    return <p className="empty-message">Loading goals...</p>
+    return <p className="empty-message">{copy.loadingGoals}</p>
   }
 
   if (goals.length === 0) {
@@ -877,13 +1164,10 @@ function GoalsScreen({
         <div className="flame-orb" aria-hidden="true">
           <FlameIcon />
         </div>
-        <h1>Create your first goal</h1>
-        <p>
-          Build long-term momentum: choose a focus, set a daily target, and track real
-          practice sessions with the timer.
-        </p>
+        <h1>{copy.emptyGoalTitle}</h1>
+        <p>{copy.emptyGoalText}</p>
         <button className="primary-button" type="button" onClick={onCreate}>
-          Create goal
+          {copy.createGoal}
         </button>
       </section>
     )
@@ -892,36 +1176,36 @@ function GoalsScreen({
   return (
     <section className="goals-list">
       <div className="section-heading">
-        <h2>My goals</h2>
-        <span>{goals.length} active</span>
+        <h2>{copy.myGoals}</h2>
+        <span>{goals.length} {copy.activeGoals}</span>
       </div>
 
       {goals.map((goal, index) => (
         <button className="goal-card" type="button" key={goal.id} onClick={() => onOpenGoal(goal.id)}>
           <div className="goal-card__top">
-            <span
-              className="entry-marker"
-              style={{ backgroundColor: markerColors[index % markerColors.length] }}
-            />
+              <span
+                className="entry-marker"
+                style={{ backgroundColor: markerColors[index % markerColors.length] }}
+              />
             <div>
               <h3>{goal.title}</h3>
-              <p>{goal.description || 'Long-term learning goal'}</p>
+              <p>{goal.description || copy.goalFallbackDescription}</p>
             </div>
-            <span className={`status-pill status-pill--${goal.status}`}>{goal.status}</span>
+            <span className={`status-pill status-pill--${goal.status}`}>{statusLabel(goal.status, copy)}</span>
           </div>
 
           <div className="goal-card__metrics">
-            <span>Streak: {goal.currentStreak} days</span>
+            <span>{copy.streak}: {goal.currentStreak}</span>
             <span>
-              Today: {formatMinutes(goal.todayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}
+              {copy.today}: {formatMinutes(goal.todayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}
             </span>
           </div>
 
           <ProgressBar value={goal.todayProgressPct} />
 
           <div className="goal-card__footer">
-            <span>Day {goal.currentDay} of {goal.totalDays}</span>
-            <span>{goal.totalProgressPct}% total</span>
+            <span>{copy.day} {goal.currentStreak} {copy.of} {goal.totalDays}</span>
+            <span>{goal.totalProgressPct}% {copy.total}</span>
           </div>
         </button>
       ))}
@@ -932,23 +1216,25 @@ function GoalsScreen({
 function CreateGoalScreen({
   form,
   formError,
+  copy,
   onChange,
   onSubmit,
 }: {
   form: GoalForm
   formError: string
+  copy: Copy
   onChange: (form: GoalForm) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
   return (
     <form className="entry-form" onSubmit={onSubmit}>
       <div className="section-heading">
-        <h2>Create goal</h2>
-        <span>long-term focus</span>
+        <h2>{copy.createGoalTitle}</h2>
+        <span>{copy.longTermFocus}</span>
       </div>
 
       <label>
-        Title
+        {copy.title}
         <input
           value={form.title}
           onChange={(event) => onChange({ ...form, title: event.target.value })}
@@ -958,7 +1244,7 @@ function CreateGoalScreen({
       </label>
 
       <label>
-        Description
+        {copy.description}
         <textarea
           value={form.description}
           onChange={(event) => onChange({ ...form, description: event.target.value })}
@@ -969,7 +1255,7 @@ function CreateGoalScreen({
 
       <div className="form-row form-row--single">
         <label>
-          Days
+          {copy.days}
           <input
             type="number"
             min="1"
@@ -982,7 +1268,7 @@ function CreateGoalScreen({
 
       <div className="form-row form-row--target">
         <label>
-          Daily target hours
+          {copy.dailyTargetHours}
           <input
             type="number"
             min="0"
@@ -994,7 +1280,7 @@ function CreateGoalScreen({
         </label>
 
         <label>
-          Minutes
+          {copy.minutes}
           <input
             type="number"
             min="0"
@@ -1007,14 +1293,12 @@ function CreateGoalScreen({
         </label>
       </div>
 
-      <p className="form-hint">
-        The goal starts today automatically. Streaks are counted daily.
-      </p>
+      <p className="form-hint">{copy.createHint}</p>
 
       {formError && <p className="form-error">{formError}</p>}
 
       <button className="primary-button" type="submit">
-        Create goal
+        {copy.createGoal}
       </button>
     </form>
   )
@@ -1023,12 +1307,14 @@ function CreateGoalScreen({
 function GoalEditForm({
   form,
   formError,
+  copy,
   onChange,
   onSubmit,
   onCancel,
 }: {
   form: GoalForm
   formError: string
+  copy: Copy
   onChange: (form: GoalForm) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onCancel: () => void
@@ -1036,12 +1322,12 @@ function GoalEditForm({
   return (
     <form className="entry-form" onSubmit={onSubmit}>
       <div className="section-heading">
-        <h2>Edit goal</h2>
-        <span>adjust target</span>
+        <h2>{copy.editGoal}</h2>
+        <span>{copy.adjustTarget}</span>
       </div>
 
       <label>
-        Title
+        {copy.title}
         <input
           value={form.title}
           onChange={(event) => onChange({ ...form, title: event.target.value })}
@@ -1050,7 +1336,7 @@ function GoalEditForm({
       </label>
 
       <label>
-        Description
+        {copy.description}
         <textarea
           value={form.description}
           onChange={(event) => onChange({ ...form, description: event.target.value })}
@@ -1060,7 +1346,7 @@ function GoalEditForm({
 
       <div className="form-row form-row--single">
         <label>
-          Days
+          {copy.days}
           <input
             type="number"
             min="1"
@@ -1073,7 +1359,7 @@ function GoalEditForm({
 
       <div className="form-row form-row--target">
         <label>
-          Daily target hours
+          {copy.dailyTargetHours}
           <input
             type="number"
             min="0"
@@ -1085,7 +1371,7 @@ function GoalEditForm({
         </label>
 
         <label>
-          Minutes
+          {copy.minutes}
           <input
             type="number"
             min="0"
@@ -1101,8 +1387,8 @@ function GoalEditForm({
       {formError && <p className="form-error">{formError}</p>}
 
       <div className="sheet-actions">
-        <button className="ghost-button" type="button" onClick={onCancel}>Cancel</button>
-        <button className="primary-button" type="submit">Save changes</button>
+        <button className="ghost-button" type="button" onClick={onCancel}>{copy.cancel}</button>
+        <button className="primary-button" type="submit">{copy.saveChanges}</button>
       </div>
     </form>
   )
@@ -1110,6 +1396,8 @@ function GoalEditForm({
 
 function GoalDetailsScreen({
   goal,
+  copy,
+  language,
   elapsedSeconds,
   timerSpeed,
   isEditingGoal,
@@ -1137,6 +1425,8 @@ function GoalDetailsScreen({
   onSessionEditTagsChange,
 }: {
   goal: GoalDetail
+  copy: Copy
+  language: AppLanguage
   elapsedSeconds: number
   timerSpeed: number
   isEditingGoal: boolean
@@ -1180,13 +1470,13 @@ function GoalDetailsScreen({
           </span>
           <div>
             <strong>{goal.currentStreak}</strong>
-            <p>day streak</p>
+            <p>{copy.dayStreak}</p>
           </div>
         </div>
         <div
           className="hero-ring"
           style={ringStyle}
-          aria-label={`Goal completed ${goal.totalProgressPct}%`}
+          aria-label={`${copy.goalCompleted} ${goal.totalProgressPct}%`}
         >
           <span>{goal.totalProgressPct}%</span>
         </div>
@@ -1195,21 +1485,21 @@ function GoalDetailsScreen({
       <section className="goal-panel">
         <div className="section-heading">
           <h2>{goal.title}</h2>
-          <span>{goal.status}</span>
+          <span>{statusLabel(goal.status, copy)}</span>
         </div>
         <p>{formatMinutes(liveTodayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}</p>
-        <small>{formatMinutes(liveRemainingMinutes)} left today</small>
+        <small>{formatMinutes(liveRemainingMinutes)} {copy.leftToday}</small>
         <div className="goal-progress-label">
-          <span>Today target</span>
+          <span>{copy.todayTarget}</span>
           <span>{liveTodayProgressPct}%</span>
         </div>
         <ProgressBar value={liveTodayProgressPct} />
         <div className="goal-meta">
-          <span>Day {goal.currentDay} of {goal.totalDays}</span>
-          <span>{formatMinutes(goal.totalPracticeMinutes)} practiced</span>
+          <span>{copy.day} {goal.currentStreak} {copy.of} {goal.totalDays}</span>
+          <span>{formatMinutes(goal.totalPracticeMinutes)} {copy.practiced}</span>
         </div>
         <button className="ghost-button compact-button" type="button" onClick={onEditGoalStart}>
-          Edit goal
+          {copy.editGoal}
         </button>
       </section>
 
@@ -1217,15 +1507,22 @@ function GoalDetailsScreen({
         <GoalEditForm
           form={editGoalForm}
           formError={formError}
+          copy={copy}
           onChange={onEditGoalChange}
           onSubmit={onEditGoalSubmit}
           onCancel={onEditGoalCancel}
         />
       )}
 
+      <ActivityCalendar
+        days={goal.calendar}
+        copy={copy}
+        language={language}
+      />
+
       <section className="timer-panel">
         <div className="dev-speed-panel" aria-label="Development timer speed">
-          <span>Dev timer</span>
+          <span>{copy.devTimer}</span>
           <div>
             {timerSpeeds.map((speed) => (
               <button
@@ -1242,21 +1539,21 @@ function GoalDetailsScreen({
 
         {sessionState === 'idle' && (
           <button className="primary-button primary-button--large" type="button" onClick={onStart}>
-            Start session
+            {copy.startSession}
           </button>
         )}
 
         {sessionState !== 'idle' && (
           <>
-            <p>{sessionState === 'running' ? 'Session running' : 'Paused'}</p>
+            <p>{sessionState === 'running' ? copy.sessionRunning : copy.paused}</p>
             <strong>{formatTimer(elapsedSeconds)}</strong>
             <div className="timer-actions">
               {sessionState === 'running' ? (
-                <button type="button" onClick={onPause}>Pause</button>
+                <button type="button" onClick={onPause}>{copy.pause}</button>
               ) : (
-                <button type="button" onClick={onResume}>Resume</button>
+                <button type="button" onClick={onResume}>{copy.resume}</button>
               )}
-              <button type="button" onClick={onFinish}>Finish session</button>
+              <button type="button" onClick={onFinish}>{copy.finishSession}</button>
             </div>
           </>
         )}
@@ -1264,6 +1561,8 @@ function GoalDetailsScreen({
 
       <HistorySection
         sessions={goal.recentSessions}
+        copy={copy}
+        language={language}
         editingSessionId={editingSessionId}
         editNotes={sessionEditNotes}
         editTags={sessionEditTags}
@@ -1277,7 +1576,7 @@ function GoalDetailsScreen({
 
       <section className="danger-panel">
         <button className="danger-button" type="button" onClick={onDelete}>
-          Delete goal
+          {copy.deleteGoal}
         </button>
       </section>
     </>
@@ -1286,6 +1585,7 @@ function GoalDetailsScreen({
 
 function FinishSessionModal({
   goal,
+  copy,
   elapsedSeconds,
   notes,
   tags,
@@ -1296,6 +1596,7 @@ function FinishSessionModal({
   onClose,
 }: {
   goal: GoalDetail
+  copy: Copy
   elapsedSeconds: number
   notes: string
   tags: string
@@ -1309,69 +1610,114 @@ function FinishSessionModal({
     <div className="modal-backdrop">
       <section className="bottom-sheet">
         <div className="section-heading">
-          <h2>Session completed</h2>
+          <h2>{copy.sessionCompleted}</h2>
           <span>{formatTimer(elapsedSeconds)}</span>
         </div>
         <p className="sheet-subtitle">{goal.title}</p>
 
         <label>
-          Notes
+          {copy.notes}
           <textarea
             value={notes}
             onChange={(event) => onNotesChange(event.target.value)}
-            placeholder="What did you do, learn, or complete today?"
+            placeholder={copy.sessionNotesPlaceholder}
             rows={4}
           />
         </label>
 
         <label>
-          Tags
+          {copy.tags}
           <input
             value={tags}
             onChange={(event) => onTagsChange(event.target.value)}
-            placeholder="SQLite, HTTP, handlers"
+            placeholder={copy.tagsPlaceholder}
           />
         </label>
 
         {formError && <p className="form-error">{formError}</p>}
 
         <div className="sheet-actions">
-          <button className="ghost-button" type="button" onClick={onClose}>Back</button>
-          <button className="primary-button" type="button" onClick={onSave}>Save session</button>
+          <button className="ghost-button" type="button" onClick={onClose}>{copy.back}</button>
+          <button className="primary-button" type="button" onClick={onSave}>{copy.saveSession}</button>
         </div>
       </section>
     </div>
   )
 }
 
-function StatsScreen({ stats }: { stats: AppStats }) {
+function StatsScreen({
+  stats,
+  goals,
+  selectedGoalId,
+  copy,
+  language,
+  onGoalChange,
+}: {
+  stats: AppStats
+  goals: GoalSummary[]
+  selectedGoalId: number
+  copy: Copy
+  language: AppLanguage
+  onGoalChange: (goalId: number) => void
+}) {
   const todayPercent = percent(stats.todayMinutes, stats.dailyTargetMinutes)
 
   return (
     <>
-      <section className="stats-grid stats-grid--large" aria-label="Statistics">
+      <section className="chart-panel">
+        <label className="stats-goal-filter">
+          {copy.selectedGoal}
+          <select
+            value={selectedGoalId}
+            onChange={(event) => onGoalChange(Number(event.target.value))}
+          >
+            <option value={0}>{copy.allGoals}</option>
+            {goals.map((goal) => (
+              <option value={goal.id} key={goal.id}>{goal.title}</option>
+            ))}
+          </select>
+        </label>
+      </section>
+
+      <section className="stats-grid stats-grid--large" aria-label={copy.screenStats}>
         <article className="stat-card">
-          <p>Sessions</p>
+          <p>{copy.sessions}</p>
           <strong>{stats.totalSessions}</strong>
         </article>
         <article className="stat-card">
-          <p>Practice</p>
+          <p>{copy.practice}</p>
           <strong>{formatMinutes(stats.totalPracticeMinutes)}</strong>
         </article>
         <article className="stat-card">
-          <p>Current streak</p>
+          <p>{copy.currentStreak}</p>
           <strong>{stats.currentStreak}</strong>
         </article>
         <article className="stat-card">
-          <p>Longest streak</p>
+          <p>{copy.longestStreak}</p>
           <strong>{stats.longestStreak}</strong>
+        </article>
+        <article className="stat-card">
+          <p>{copy.completedDays}</p>
+          <strong>{stats.completedDays}</strong>
+        </article>
+        <article className="stat-card">
+          <p>{copy.missedDays}</p>
+          <strong>{stats.missedDays}</strong>
+        </article>
+        <article className="stat-card">
+          <p>{copy.completionRate}</p>
+          <strong>{stats.completionRate}%</strong>
+        </article>
+        <article className="stat-card">
+          <p>{copy.weeklyCompletionRate}</p>
+          <strong>{stats.weeklyCompletionRate}%</strong>
         </article>
       </section>
 
       <section className="chart-panel">
         <div className="section-heading">
-          <h2>Today</h2>
-          <span>{todayPercent}% of target</span>
+          <h2>{copy.today}</h2>
+          <span>{todayPercent}% {copy.targetPercent}</span>
         </div>
         <p className="chart-caption">
           {formatMinutes(stats.todayMinutes)} / {formatMinutes(stats.dailyTargetMinutes)}
@@ -1381,9 +1727,12 @@ function StatsScreen({ stats }: { stats: AppStats }) {
 
       <section className="chart-panel">
         <div className="section-heading">
-          <h2>Week</h2>
-          <span>actual vs target</span>
+          <h2>{copy.week}</h2>
+          <span>{stats.weekComparisonPct >= 0 ? '+' : ''}{stats.weekComparisonPct}%</span>
         </div>
+        <p className="chart-caption">
+          {copy.previousWeek}: {formatMinutes(stats.previousWeekMinutes)} · {copy.weekComparison}
+        </p>
         <div className="weekly-chart">
           {stats.weekly.map((day) => {
             const value = percent(day.minutes, day.targetMinutes)
@@ -1395,20 +1744,26 @@ function StatsScreen({ stats }: { stats: AppStats }) {
                     style={{ height: `${Math.max(value, day.minutes > 0 ? 12 : 0)}%` }}
                   />
                 </span>
-                <small>{day.label}</small>
+                <small>{formatWeekday(day.date, language)}</small>
               </div>
             )
           })}
         </div>
       </section>
 
+      <ActivityCalendar
+        days={stats.calendar}
+        copy={copy}
+        language={language}
+      />
+
       <section className="chart-panel">
         <div className="section-heading">
-          <h2>Month</h2>
+          <h2>{copy.month}</h2>
           <span>{formatMinutes(stats.monthlyTotalMinutes)}</span>
         </div>
         {stats.goalDistribution.length === 0 && (
-          <p className="empty-message">Distribution will appear after your first session.</p>
+          <p className="empty-message">{copy.emptyDistribution}</p>
         )}
         {stats.goalDistribution.map((item, index) => (
           <article className="category-row" key={item.goalId}>
@@ -1432,8 +1787,47 @@ function StatsScreen({ stats }: { stats: AppStats }) {
   )
 }
 
+function ActivityCalendar({
+  days,
+  copy,
+  language,
+}: {
+  days: WeeklyStat[]
+  copy: Copy
+  language: AppLanguage
+}) {
+  return (
+    <section className="chart-panel">
+      <div className="section-heading">
+        <h2>{copy.calendar}</h2>
+        <span>{days.length} {copy.days}</span>
+      </div>
+      <div className="activity-calendar" aria-label={copy.calendar}>
+        {days.map((day) => {
+          const state = calendarDayState(day)
+          return (
+            <span
+              className={`calendar-day calendar-day--${state}`}
+              key={day.date}
+              title={`${formatFullDate(day.date, language)} · ${formatMinutes(day.minutes)} / ${formatMinutes(day.targetMinutes)}`}
+              aria-label={`${formatFullDate(day.date, language)} ${formatMinutes(day.minutes)} / ${formatMinutes(day.targetMinutes)}`}
+            />
+          )
+        })}
+      </div>
+      <div className="calendar-legend">
+        <span><i className="calendar-day calendar-day--completed" />{copy.completedDay}</span>
+        <span><i className="calendar-day calendar-day--partial" />{copy.partialDay}</span>
+        <span><i className="calendar-day calendar-day--missed" />{copy.missedDay}</span>
+      </div>
+    </section>
+  )
+}
+
 function HistorySection({
   sessions,
+  copy,
+  language,
   editingSessionId,
   editNotes,
   editTags,
@@ -1445,6 +1839,8 @@ function HistorySection({
   onTagsChange,
 }: {
   sessions: Session[]
+  copy: Copy
+  language: AppLanguage
   editingSessionId: number | null
   editNotes: string
   editTags: string
@@ -1458,11 +1854,11 @@ function HistorySection({
   return (
     <section className="entries-section">
       <div className="section-heading">
-        <h2>History</h2>
-        <span>{sessions.length} recent</span>
+        <h2>{copy.history}</h2>
+        <span>{sessions.length} {copy.recent}</span>
       </div>
       {sessions.length === 0 && (
-        <p className="empty-message">No sessions yet. Start the timer and save your result.</p>
+        <p className="empty-message">{copy.emptyHistory}</p>
       )}
       {sessions.map((session, index) => (
         <article className="history-card" key={session.id}>
@@ -1471,12 +1867,12 @@ function HistorySection({
             style={{ backgroundColor: markerColors[index % markerColors.length] }}
           />
           <div>
-            <p>{formatSessionDate(session.endedAt)}</p>
+            <p>{formatSessionDate(session.endedAt, language)}</p>
             <strong>{formatMinutes(session.durationMinutes)}</strong>
             {editingSessionId === session.id ? (
               <div className="history-edit-form">
                 <label>
-                  Notes
+                  {copy.notes}
                   <textarea
                     value={editNotes}
                     onChange={(event) => onNotesChange(event.target.value)}
@@ -1484,16 +1880,16 @@ function HistorySection({
                   />
                 </label>
                 <label>
-                  Tags
+                  {copy.tags}
                   <input
                     value={editTags}
                     onChange={(event) => onTagsChange(event.target.value)}
-                    placeholder="SQLite, API, stats"
+                    placeholder={copy.tagsPlaceholder}
                   />
                 </label>
                 <div className="history-actions">
-                  <button type="button" onClick={onEditCancel}>Cancel</button>
-                  <button className="history-action--primary" type="button" onClick={() => onEditSave(session.id)}>Save</button>
+                  <button type="button" onClick={onEditCancel}>{copy.cancel}</button>
+                  <button className="history-action--primary" type="button" onClick={() => onEditSave(session.id)}>{copy.save}</button>
                 </div>
               </div>
             ) : (
@@ -1507,8 +1903,8 @@ function HistorySection({
                   </div>
                 )}
                 <div className="history-actions">
-                  <button type="button" onClick={() => onEditStart(session)}>Edit</button>
-                  <button className="history-action--danger" type="button" onClick={() => onDelete(session)}>Delete</button>
+                  <button type="button" onClick={() => onEditStart(session)}>{copy.edit}</button>
+                  <button className="history-action--danger" type="button" onClick={() => onDelete(session)}>{copy.delete}</button>
                 </div>
               </>
             )}
@@ -1570,13 +1966,24 @@ function loadSettings(): AppSettings {
       return defaultSettings
     }
 
+    const parsedSettings = JSON.parse(savedSettings) as Partial<Omit<AppSettings, 'theme'>> & { theme?: string }
+
     return {
       ...defaultSettings,
-      ...(JSON.parse(savedSettings) as Partial<AppSettings>),
+      ...parsedSettings,
+      theme: normalizeTheme(parsedSettings.theme),
     }
   } catch {
     return defaultSettings
   }
+}
+
+function normalizeTheme(theme: string | undefined): ThemeMode {
+  if (theme === 'light') {
+    return theme
+  }
+
+  return 'dark'
 }
 
 function formatTimer(seconds: number) {
@@ -1590,11 +1997,52 @@ function formatTimer(seconds: number) {
     .join(':')
 }
 
-function formatSessionDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+function statusLabel(status: GoalSummary['status'], copy: Copy) {
+  if (status === 'completed') {
+    return copy.statusCompleted
+  }
+
+  return copy.statusActive
+}
+
+function localeFor(language: AppLanguage) {
+  return language === 'ru' ? 'ru-RU' : 'en-US'
+}
+
+function formatSessionDate(value: string, language: AppLanguage) {
+  return new Intl.DateTimeFormat(localeFor(language), {
     month: 'long',
     day: 'numeric',
   }).format(new Date(value))
+}
+
+function formatWeekday(value: string, language: AppLanguage) {
+  return new Intl.DateTimeFormat(localeFor(language), {
+    weekday: 'short',
+  }).format(new Date(value))
+}
+
+function formatFullDate(value: string, language: AppLanguage) {
+  return new Intl.DateTimeFormat(localeFor(language), {
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(value))
+}
+
+function calendarDayState(day: WeeklyStat) {
+  if (day.targetMinutes <= 0) {
+    return 'empty'
+  }
+
+  if (day.isCompleted) {
+    return 'completed'
+  }
+
+  if (day.minutes > 0) {
+    return 'partial'
+  }
+
+  return 'missed'
 }
 
 function toLocalISOString(date: Date) {
