@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,24 @@ func setupTestDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	db = database
+
+	_, err = db.Exec(`
+		INSERT INTO users (id, email, name, password_hash, created_at)
+		VALUES (1, 'test@example.com', 'Test User', 'test-hash', ?)
+	`, time.Now().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testAuthToken(t *testing.T) string {
+	t.Helper()
+
+	token, err := createAuthSession(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 func TestCalculateGoalStreaksUsesCalendarDays(t *testing.T) {
@@ -170,6 +189,7 @@ func TestCreateSessionMergesSameDaySession(t *testing.T) {
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/goals/1/sessions", strings.NewReader(body))
 		request.SetPathValue("id", "1")
+		request.Header.Set("Authorization", "Bearer "+testAuthToken(t))
 		response := httptest.NewRecorder()
 
 		createSessionHandler(response, request)
@@ -242,6 +262,91 @@ func TestGoalSummaryCountsCompletedDays(t *testing.T) {
 	}
 }
 
+func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
+	setupTestDatabase(t)
+
+	registerRequest := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{
+		"email":"learner@example.com",
+		"name":"Learner",
+		"password":"password123"
+	}`))
+	registerResponse := httptest.NewRecorder()
+
+	registerHandler(registerResponse, registerRequest)
+
+	if registerResponse.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, body = %s", registerResponse.Code, registerResponse.Body.String())
+	}
+
+	var auth AuthResponse
+	if err := json.NewDecoder(registerResponse.Body).Decode(&auth); err != nil {
+		t.Fatal(err)
+	}
+	if auth.Token == "" || auth.User.ID == 0 {
+		t.Fatalf("auth response = %+v, want token and user", auth)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{
+		"email":"learner@example.com",
+		"password":"password123"
+	}`))
+	loginResponse := httptest.NewRecorder()
+
+	loginHandler(loginResponse, loginRequest)
+
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("login status = %d, body = %s", loginResponse.Code, loginResponse.Body.String())
+	}
+
+	createGoalRequest := httptest.NewRequest(http.MethodPost, "/goals", strings.NewReader(`{
+		"title":"Private goal",
+		"totalDays":30,
+		"dailyTargetMinutes":20
+	}`))
+	createGoalRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	createGoalResponse := httptest.NewRecorder()
+
+	createGoalHandler(createGoalResponse, createGoalRequest)
+
+	if createGoalResponse.Code != http.StatusCreated {
+		t.Fatalf("create goal status = %d, body = %s", createGoalResponse.Code, createGoalResponse.Body.String())
+	}
+
+	ownerGoalsRequest := httptest.NewRequest(http.MethodGet, "/goals", nil)
+	ownerGoalsRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	ownerGoalsResponse := httptest.NewRecorder()
+
+	goalsHandler(ownerGoalsResponse, ownerGoalsRequest)
+
+	if ownerGoalsResponse.Code != http.StatusOK {
+		t.Fatalf("owner goals status = %d, body = %s", ownerGoalsResponse.Code, ownerGoalsResponse.Body.String())
+	}
+	var ownerGoals []GoalSummary
+	if err := json.NewDecoder(ownerGoalsResponse.Body).Decode(&ownerGoals); err != nil {
+		t.Fatal(err)
+	}
+	if len(ownerGoals) != 1 {
+		t.Fatalf("owner goals count = %d, want 1", len(ownerGoals))
+	}
+
+	otherGoalsRequest := httptest.NewRequest(http.MethodGet, "/goals", nil)
+	otherGoalsRequest.Header.Set("Authorization", "Bearer "+testAuthToken(t))
+	otherGoalsResponse := httptest.NewRecorder()
+
+	goalsHandler(otherGoalsResponse, otherGoalsRequest)
+
+	if otherGoalsResponse.Code != http.StatusOK {
+		t.Fatalf("other goals status = %d, body = %s", otherGoalsResponse.Code, otherGoalsResponse.Body.String())
+	}
+	var otherGoals []GoalSummary
+	if err := json.NewDecoder(otherGoalsResponse.Body).Decode(&otherGoals); err != nil {
+		t.Fatal(err)
+	}
+	if len(otherGoals) != 0 {
+		t.Fatalf("other goals count = %d, want 0", len(otherGoals))
+	}
+}
+
 func insertSessionForDate(t *testing.T, goalID int, date time.Time, durationMinutes int) {
 	t.Helper()
 
@@ -256,7 +361,7 @@ func insertSessionForDate(t *testing.T, goalID int, date time.Time, durationMinu
 		t.Fatal(err)
 	}
 
-	goal, err := loadGoal(goalID)
+	goal, err := loadGoal(goalID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

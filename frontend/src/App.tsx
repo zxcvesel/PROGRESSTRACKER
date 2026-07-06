@@ -87,6 +87,26 @@ type GoalForm = {
   dailyTargetMinutes: string
 }
 
+type AuthUser = {
+  id: number
+  email: string
+  name: string
+  createdAt: string
+}
+
+type AuthResponse = {
+  user: AuthUser
+  token: string
+}
+
+type AuthMode = 'login' | 'register'
+
+type AuthForm = {
+  email: string
+  name: string
+  password: string
+}
+
 type AppSettings = {
   theme: ThemeMode
   accent: AccentColor
@@ -123,6 +143,7 @@ const defaultStats: AppStats = {
 const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
 const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 const settingsStorageKey = 'progress-tracker-settings'
+const authTokenStorageKey = 'progress-tracker-auth-token'
 const defaultSettings: AppSettings = {
   theme: 'dark',
   accent: 'cyan',
@@ -147,6 +168,22 @@ const translations = {
     navGoals: 'Goals',
     navCreateGoal: 'Create goal',
     navStats: 'Stats',
+    signInTitle: 'Welcome back',
+    registerTitle: 'Create account',
+    authSubtitle: 'Sign in to keep your goals, sessions, streaks, and stats private.',
+    signIn: 'Sign in',
+    createAccount: 'Create account',
+    email: 'Email',
+    name: 'Name',
+    password: 'Password',
+    passwordHint: 'Use at least 8 characters.',
+    noAccount: 'No account yet?',
+    haveAccount: 'Already have an account?',
+    authError: 'Could not complete authentication',
+    account: 'Account',
+    signedInAs: 'Signed in as',
+    logout: 'Log out',
+    logoutError: 'Could not log out',
     loadingGoals: 'Loading goals...',
     emptyGoalTitle: 'Create your first goal',
     emptyGoalText: 'Build long-term momentum: choose a focus, set a daily target, and track real practice sessions with the timer.',
@@ -266,6 +303,22 @@ const translations = {
     navGoals: 'Цели',
     navCreateGoal: 'Создать цель',
     navStats: 'Статистика',
+    signInTitle: 'С возвращением',
+    registerTitle: 'Создание аккаунта',
+    authSubtitle: 'Войдите, чтобы цели, сессии, серии и статистика были привязаны к вашему аккаунту.',
+    signIn: 'Войти',
+    createAccount: 'Создать аккаунт',
+    email: 'Email',
+    name: 'Имя',
+    password: 'Пароль',
+    passwordHint: 'Минимум 8 символов.',
+    noAccount: 'Еще нет аккаунта?',
+    haveAccount: 'Уже есть аккаунт?',
+    authError: 'Не удалось выполнить вход',
+    account: 'Аккаунт',
+    signedInAs: 'Вы вошли как',
+    logout: 'Выйти',
+    logoutError: 'Не удалось выйти',
     loadingGoals: 'Загрузка целей...',
     emptyGoalTitle: 'Создайте первую цель',
     emptyGoalText: 'Выберите фокус, задайте дневную норму и отслеживайте реальные занятия через таймер.',
@@ -273,7 +326,7 @@ const translations = {
     myGoals: 'Мои цели',
     activeGoals: 'активных',
     goalFallbackDescription: 'Долгосрочная учебная цель',
-    streak: 'Стрик',
+    streak: 'Серия',
     today: 'Сегодня',
     day: 'День',
     of: 'из',
@@ -285,7 +338,7 @@ const translations = {
     days: 'Дни',
     dailyTargetHours: 'Дневная норма, часы',
     minutes: 'Минуты',
-    createHint: 'Цель начинается сегодня автоматически. Стрик считается по дням.',
+    createHint: 'Цель начинается сегодня автоматически. Серия считается по дням.',
     editGoal: 'Редактировать цель',
     adjustTarget: 'изменить цель',
     cancel: 'Отмена',
@@ -384,6 +437,11 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const copy = translations[settings.language]
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [authToken, setAuthToken] = useState(() => window.localStorage.getItem(authTokenStorageKey) || '')
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [authMode, setAuthMode] = useState<AuthMode>('login')
+  const [authForm, setAuthForm] = useState<AuthForm>({ email: '', name: '', password: '' })
+  const [authError, setAuthError] = useState('')
   const [goals, setGoals] = useState<GoalSummary[]>([])
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
   const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null)
@@ -416,6 +474,15 @@ function App() {
   useEffect(() => {
     loadInitialData()
   }, [])
+
+  useEffect(() => {
+    if (authToken) {
+      window.localStorage.setItem(authTokenStorageKey, authToken)
+      return
+    }
+
+    window.localStorage.removeItem(authTokenStorageKey)
+  }, [authToken])
 
   useEffect(() => {
     window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
@@ -463,7 +530,10 @@ function App() {
 
   async function loadInitialData() {
     setIsLoading(true)
-    await Promise.all([checkBackend(), loadGoals(), loadStats()])
+    await checkBackend()
+    if (authToken) {
+      await loadAccount(authToken)
+    }
     setIsLoading(false)
   }
 
@@ -477,9 +547,90 @@ function App() {
     }
   }
 
-  async function loadGoals() {
+  async function apiFetch(path: string, options: RequestInit = {}, token = authToken) {
+    const headers = new Headers(options.headers)
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+
+    const response = await fetch(path, { ...options, headers })
+    if (response.status === 401) {
+      handleAuthReset()
+    }
+    return response
+  }
+
+  async function loadAccount(token = authToken) {
     try {
-      const response = await fetch('/api/goals')
+      const response = await apiFetch('/api/me', {}, token)
+      if (!response.ok) {
+        throw new Error('Failed to load account')
+      }
+
+      const user = (await response.json()) as AuthUser
+      setCurrentUser(user)
+      await Promise.all([loadGoals(token), loadStats(selectedStatsGoalId, token)])
+    } catch {
+      handleAuthReset()
+    }
+  }
+
+  function handleAuthReset() {
+    setAuthToken('')
+    setCurrentUser(null)
+    setGoals([])
+    setGoalDetail(null)
+    setSelectedGoalId(null)
+    setSelectedStatsGoalId(0)
+    setStats(defaultStats)
+    setView('goals')
+    resetSession()
+  }
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setAuthError('')
+
+    try {
+      const response = await fetch(`/api/auth/${authMode === 'login' ? 'login' : 'register'}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(authForm),
+      })
+
+      if (!response.ok) {
+        throw new Error('Authentication failed')
+      }
+
+      const data = (await response.json()) as AuthResponse
+      setAuthToken(data.token)
+      setCurrentUser(data.user)
+      setAuthForm({ email: '', name: '', password: '' })
+      setSelectedGoalId(null)
+      setSelectedStatsGoalId(0)
+      setGoalDetail(null)
+      setView('goals')
+      await Promise.all([loadGoals(data.token), loadStats(0, data.token)])
+    } catch {
+      setAuthError(copy.authError)
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' })
+    } catch {
+      window.alert(copy.logoutError)
+    } finally {
+      handleAuthReset()
+    }
+  }
+
+  async function loadGoals(token = authToken) {
+    try {
+      const response = await apiFetch('/api/goals', {}, token)
       const data = (await response.json()) as GoalSummary[]
       setGoals(data)
     } catch {
@@ -487,10 +638,10 @@ function App() {
     }
   }
 
-  async function loadStats(goalId = selectedStatsGoalId) {
+  async function loadStats(goalId = selectedStatsGoalId, token = authToken) {
     try {
       const query = goalId ? `?goalId=${goalId}` : ''
-      const response = await fetch(`/api/stats${query}`)
+      const response = await apiFetch(`/api/stats${query}`, {}, token)
       const data = (await response.json()) as AppStats
       setStats(data)
     } catch {
@@ -507,7 +658,7 @@ function App() {
   }
 
   async function loadGoalDetail(goalId: number) {
-    const response = await fetch(`/api/goals/${goalId}`)
+    const response = await apiFetch(`/api/goals/${goalId}`)
     const data = (await response.json()) as GoalDetail
     setGoalDetail(data)
   }
@@ -525,7 +676,7 @@ function App() {
     }
 
     try {
-      const response = await fetch('/api/goals', {
+      const response = await apiFetch('/api/goals', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -586,7 +737,7 @@ function App() {
       return
     }
 
-    const response = await fetch(`/api/goals/${goalDetail.id}/sessions`, {
+    const response = await apiFetch(`/api/goals/${goalDetail.id}/sessions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -637,7 +788,7 @@ function App() {
       return
     }
 
-    const response = await fetch(`/api/goals/${goalDetail.id}`, {
+    const response = await apiFetch(`/api/goals/${goalDetail.id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -675,7 +826,7 @@ function App() {
       }
     }
 
-    const response = await fetch(`/api/goals/${goalDetail.id}`, {
+    const response = await apiFetch(`/api/goals/${goalDetail.id}`, {
       method: 'DELETE',
     })
 
@@ -703,7 +854,7 @@ function App() {
       return
     }
 
-    const response = await fetch(`/api/goals/${goalDetail.id}/sessions/${sessionId}`, {
+    const response = await apiFetch(`/api/goals/${goalDetail.id}/sessions/${sessionId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -736,7 +887,7 @@ function App() {
       return
     }
 
-    const response = await fetch(`/api/goals/${goalDetail.id}/sessions/${session.id}`, {
+    const response = await apiFetch(`/api/goals/${goalDetail.id}/sessions/${session.id}`, {
       method: 'DELETE',
     })
 
@@ -814,81 +965,100 @@ function App() {
             />
           </header>
 
-          {view === 'goals' && !selectedGoalId && (
-            <GoalsScreen
-              goals={goals}
-              isLoading={isLoading}
+          {!currentUser && (
+            <AuthScreen
+              mode={authMode}
+              form={authForm}
+              error={authError}
               copy={copy}
-              onCreate={() => {
-                setGoalForm(createDefaultGoalForm(settings))
-                setView('create')
+              onModeChange={(mode) => {
+                setAuthMode(mode)
+                setAuthError('')
               }}
-              onOpenGoal={openGoal}
+              onChange={setAuthForm}
+              onSubmit={handleAuthSubmit}
             />
           )}
 
-          {view === 'goals' && selectedGoalId && goalDetail && (
-            <GoalDetailsScreen
-              goal={goalDetail}
-              copy={copy}
-              language={settings.language}
-              elapsedSeconds={elapsedSeconds}
-              timerSpeed={timerSpeed}
-              isEditingGoal={isEditingGoal}
-              editGoalForm={editGoalForm}
-              formError={formError}
-              sessionState={sessionState}
-              editingSessionId={editingSessionId}
-              sessionEditNotes={sessionEditNotes}
-              sessionEditTags={sessionEditTags}
-              onTimerSpeedChange={setTimerSpeed}
-              onEditGoalChange={setEditGoalForm}
-              onEditGoalSubmit={updateGoal}
-              onEditGoalStart={startEditGoal}
-              onEditGoalCancel={() => {
-                setIsEditingGoal(false)
-                setFormError('')
-              }}
-              onStart={startSession}
-              onPause={pauseSession}
-              onResume={resumeSession}
-              onFinish={finishSession}
-              onDelete={deleteGoal}
-              onEditSessionStart={startEditSession}
-              onEditSessionCancel={() => setEditingSessionId(null)}
-              onEditSessionSave={updateSession}
-              onDeleteSession={deleteSession}
-              onSessionEditNotesChange={setSessionEditNotes}
-              onSessionEditTagsChange={setSessionEditTags}
-            />
-          )}
+          {currentUser && (
+            <>
+              {view === 'goals' && !selectedGoalId && (
+                <GoalsScreen
+                  goals={goals}
+                  isLoading={isLoading}
+                  copy={copy}
+                  onCreate={() => {
+                    setGoalForm(createDefaultGoalForm(settings))
+                    setView('create')
+                  }}
+                  onOpenGoal={openGoal}
+                />
+              )}
 
-          {view === 'create' && (
-            <CreateGoalScreen
-              form={goalForm}
-              formError={formError}
-              copy={copy}
-              onChange={setGoalForm}
-              onSubmit={handleCreateGoal}
-            />
-          )}
+              {view === 'goals' && selectedGoalId && goalDetail && (
+                <GoalDetailsScreen
+                  goal={goalDetail}
+                  copy={copy}
+                  language={settings.language}
+                  elapsedSeconds={elapsedSeconds}
+                  timerSpeed={timerSpeed}
+                  isEditingGoal={isEditingGoal}
+                  editGoalForm={editGoalForm}
+                  formError={formError}
+                  sessionState={sessionState}
+                  editingSessionId={editingSessionId}
+                  sessionEditNotes={sessionEditNotes}
+                  sessionEditTags={sessionEditTags}
+                  onTimerSpeedChange={setTimerSpeed}
+                  onEditGoalChange={setEditGoalForm}
+                  onEditGoalSubmit={updateGoal}
+                  onEditGoalStart={startEditGoal}
+                  onEditGoalCancel={() => {
+                    setIsEditingGoal(false)
+                    setFormError('')
+                  }}
+                  onStart={startSession}
+                  onPause={pauseSession}
+                  onResume={resumeSession}
+                  onFinish={finishSession}
+                  onDelete={deleteGoal}
+                  onEditSessionStart={startEditSession}
+                  onEditSessionCancel={() => setEditingSessionId(null)}
+                  onEditSessionSave={updateSession}
+                  onDeleteSession={deleteSession}
+                  onSessionEditNotesChange={setSessionEditNotes}
+                  onSessionEditTagsChange={setSessionEditTags}
+                />
+              )}
 
-          {view === 'stats' && (
-            <StatsScreen
-              stats={stats}
-              goals={goals}
-              selectedGoalId={selectedStatsGoalId}
-              copy={copy}
-              language={settings.language}
-              onGoalChange={(goalId) => {
-                setSelectedStatsGoalId(goalId)
-                void loadStats(goalId)
-              }}
-            />
+              {view === 'create' && (
+                <CreateGoalScreen
+                  form={goalForm}
+                  formError={formError}
+                  copy={copy}
+                  onChange={setGoalForm}
+                  onSubmit={handleCreateGoal}
+                />
+              )}
+
+              {view === 'stats' && (
+                <StatsScreen
+                  stats={stats}
+                  goals={goals}
+                  selectedGoalId={selectedStatsGoalId}
+                  copy={copy}
+                  language={settings.language}
+                  onGoalChange={(goalId) => {
+                    setSelectedStatsGoalId(goalId)
+                    void loadStats(goalId)
+                  }}
+                />
+              )}
+            </>
           )}
         </div>
 
-        <nav className="bottom-nav" aria-label={copy.mainNavigation}>
+        {currentUser && <nav className="bottom-nav" aria-label={copy.mainNavigation}>
           <button
             className={view === 'goals' ? 'is-active' : ''}
             type="button"
@@ -933,9 +1103,9 @@ function App() {
           >
             <ChartIcon />
           </button>
-        </nav>
+        </nav>}
 
-        {finishModalOpen && goalDetail && (
+        {currentUser && finishModalOpen && goalDetail && (
           <FinishSessionModal
             goal={goalDetail}
             copy={copy}
@@ -953,27 +1123,117 @@ function App() {
         <SettingsDrawer
           isOpen={settingsOpen}
           settings={settings}
+          currentUser={currentUser}
           copy={copy}
           onClose={() => setSettingsOpen(false)}
           onChange={(nextSettings) => setSettings((current) => ({ ...current, ...nextSettings }))}
+          onLogout={handleLogout}
         />
       </section>
     </main>
   )
 }
 
+function AuthScreen({
+  mode,
+  form,
+  error,
+  copy,
+  onModeChange,
+  onChange,
+  onSubmit,
+}: {
+  mode: AuthMode
+  form: AuthForm
+  error: string
+  copy: Copy
+  onModeChange: (mode: AuthMode) => void
+  onChange: (form: AuthForm) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  const isRegister = mode === 'register'
+
+  return (
+    <section className="auth-screen">
+      <div className="flame-orb" aria-hidden="true">
+        <FlameIcon />
+      </div>
+      <div>
+        <h1>{isRegister ? copy.registerTitle : copy.signInTitle}</h1>
+        <p>{copy.authSubtitle}</p>
+      </div>
+
+      <form className="auth-form" onSubmit={onSubmit}>
+        <label>
+          {copy.email}
+          <input
+            type="email"
+            autoComplete="email"
+            required
+            value={form.email}
+            onChange={(event) => onChange({ ...form, email: event.target.value })}
+          />
+        </label>
+
+        {isRegister && (
+          <label>
+            {copy.name}
+            <input
+              type="text"
+              autoComplete="name"
+              value={form.name}
+              onChange={(event) => onChange({ ...form, name: event.target.value })}
+            />
+          </label>
+        )}
+
+        <label>
+          {copy.password}
+          <input
+            type="password"
+            autoComplete={isRegister ? 'new-password' : 'current-password'}
+            minLength={8}
+            required
+            value={form.password}
+            onChange={(event) => onChange({ ...form, password: event.target.value })}
+          />
+        </label>
+
+        <span className="form-hint">{copy.passwordHint}</span>
+        {error && <p className="form-error">{error}</p>}
+
+        <button className="primary-button primary-button--large" type="submit">
+          {isRegister ? copy.createAccount : copy.signIn}
+        </button>
+      </form>
+
+      <button
+        className="ghost-button auth-switch"
+        type="button"
+        onClick={() => onModeChange(isRegister ? 'login' : 'register')}
+      >
+        {isRegister ? copy.haveAccount : copy.noAccount} {isRegister ? copy.signIn : copy.createAccount}
+      </button>
+    </section>
+  )
+}
+
 function SettingsDrawer({
   isOpen,
   settings,
+  currentUser,
   copy,
   onClose,
   onChange,
+  onLogout,
 }: {
   isOpen: boolean
   settings: AppSettings
+  currentUser: AuthUser | null
   copy: Copy
   onClose: () => void
   onChange: (settings: Partial<AppSettings>) => void
+  onLogout: () => void
 }) {
   if (!isOpen) {
     return null
@@ -996,6 +1256,17 @@ function SettingsDrawer({
             <span />
           </button>
         </div>
+
+        {currentUser && (
+          <SettingsGroup title={copy.account}>
+            <div className="about-list">
+              <p><span>{copy.signedInAs}</span><strong>{currentUser.email}</strong></p>
+            </div>
+            <button className="ghost-button" type="button" onClick={onLogout}>
+              {copy.logout}
+            </button>
+          </SettingsGroup>
+        )}
 
         <SettingsGroup title={copy.appearance}>
           <label>

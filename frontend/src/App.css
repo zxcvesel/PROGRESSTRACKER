@@ -302,6 +302,7 @@
 .entry-card,
 .goal-card,
 .timer-panel,
+.auth-form,
 .empty-state {
   border: 1px solid rgba(148, 163, 184, 0.11);
   background: var(--panel-bg);
@@ -422,6 +423,74 @@
 .empty-state p {
   color: var(--muted);
   font-size: 14px;
+}
+
+.auth-screen {
+  display: grid;
+  min-height: 560px;
+  align-content: center;
+  gap: 18px;
+  padding: 18px 2px;
+}
+
+.auth-screen .flame-orb {
+  margin: 0 auto;
+}
+
+.auth-screen h1 {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: calc(30px * var(--font-scale));
+  line-height: 1;
+  text-align: center;
+}
+
+.auth-screen p {
+  max-width: 300px;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: calc(14px * var(--font-scale));
+  line-height: 1.5;
+  text-align: center;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 700;
+}
+
+.auth-form input {
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 12px;
+  color: var(--text-strong);
+  background: var(--field-bg);
+  outline: none;
+}
+
+.auth-form input:focus {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.form-hint {
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+}
+
+.auth-switch {
+  width: 100%;
 }
 
 .goal-panel p {
