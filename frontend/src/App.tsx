@@ -105,6 +105,13 @@ type AuthForm = {
   email: string
   name: string
   password: string
+  confirmPassword: string
+}
+
+type PasswordForm = {
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
 }
 
 type AppSettings = {
@@ -176,12 +183,26 @@ const translations = {
     email: 'Email',
     name: 'Name',
     password: 'Password',
-    passwordHint: 'Use at least 8 characters.',
+    confirmPassword: 'Confirm password',
+    currentPassword: 'Current password',
+    newPassword: 'New password',
+    passwordHint: 'At least 8 characters with an uppercase letter, a number, and a special character.',
+    passwordMismatch: 'Passwords do not match',
+    passwordPolicyError: 'Password must include an uppercase letter, a number, and a special character.',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
     noAccount: 'No account yet?',
     haveAccount: 'Already have an account?',
     authError: 'Could not complete authentication',
     account: 'Account',
     signedInAs: 'Signed in as',
+    displayName: 'Display name',
+    saveProfile: 'Save profile',
+    profileSaved: 'Profile updated',
+    profileError: 'Could not update profile',
+    changePassword: 'Change password',
+    passwordChanged: 'Password changed',
+    passwordChangeError: 'Could not change password',
     logout: 'Log out',
     logoutError: 'Could not log out',
     loadingGoals: 'Loading goals...',
@@ -311,12 +332,26 @@ const translations = {
     email: 'Email',
     name: 'Имя',
     password: 'Пароль',
-    passwordHint: 'Минимум 8 символов.',
+    confirmPassword: 'Повторите пароль',
+    currentPassword: 'Текущий пароль',
+    newPassword: 'Новый пароль',
+    passwordHint: 'Минимум 8 символов, заглавная буква, цифра и спецсимвол.',
+    passwordMismatch: 'Пароли не совпадают',
+    passwordPolicyError: 'Пароль должен содержать заглавную букву, цифру и спецсимвол.',
+    showPassword: 'Показать пароль',
+    hidePassword: 'Скрыть пароль',
     noAccount: 'Еще нет аккаунта?',
     haveAccount: 'Уже есть аккаунт?',
     authError: 'Не удалось выполнить вход',
     account: 'Аккаунт',
     signedInAs: 'Вы вошли как',
+    displayName: 'Имя',
+    saveProfile: 'Сохранить профиль',
+    profileSaved: 'Профиль обновлен',
+    profileError: 'Не удалось обновить профиль',
+    changePassword: 'Сменить пароль',
+    passwordChanged: 'Пароль изменен',
+    passwordChangeError: 'Не удалось сменить пароль',
     logout: 'Выйти',
     logoutError: 'Не удалось выйти',
     loadingGoals: 'Загрузка целей...',
@@ -440,8 +475,16 @@ function App() {
   const [authToken, setAuthToken] = useState(() => window.localStorage.getItem(authTokenStorageKey) || '')
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [authMode, setAuthMode] = useState<AuthMode>('login')
-  const [authForm, setAuthForm] = useState<AuthForm>({ email: '', name: '', password: '' })
+  const [authForm, setAuthForm] = useState<AuthForm>({ email: '', name: '', password: '', confirmPassword: '' })
   const [authError, setAuthError] = useState('')
+  const [accountName, setAccountName] = useState('')
+  const [passwordForm, setPasswordForm] = useState<PasswordForm>({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  })
+  const [accountMessage, setAccountMessage] = useState('')
+  const [accountError, setAccountError] = useState('')
   const [goals, setGoals] = useState<GoalSummary[]>([])
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
   const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null)
@@ -487,6 +530,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
   }, [settings])
+
+  useEffect(() => {
+    setAccountName(currentUser?.name || '')
+  }, [currentUser])
 
   useEffect(() => {
     if (sessionState !== 'running' || !goalDetail) {
@@ -584,6 +631,9 @@ function App() {
     setSelectedStatsGoalId(0)
     setStats(defaultStats)
     setView('goals')
+    setAccountMessage('')
+    setAccountError('')
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
     resetSession()
   }
 
@@ -591,13 +641,28 @@ function App() {
     event.preventDefault()
     setAuthError('')
 
+    if (authMode === 'register') {
+      if (authForm.password !== authForm.confirmPassword) {
+        setAuthError(copy.passwordMismatch)
+        return
+      }
+      if (!isStrongPassword(authForm.password)) {
+        setAuthError(copy.passwordPolicyError)
+        return
+      }
+    }
+
     try {
       const response = await fetch(`/api/auth/${authMode === 'login' ? 'login' : 'register'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(authForm),
+        body: JSON.stringify({
+          email: authForm.email,
+          name: authForm.name,
+          password: authForm.password,
+        }),
       })
 
       if (!response.ok) {
@@ -607,7 +672,7 @@ function App() {
       const data = (await response.json()) as AuthResponse
       setAuthToken(data.token)
       setCurrentUser(data.user)
-      setAuthForm({ email: '', name: '', password: '' })
+      setAuthForm({ email: '', name: '', password: '', confirmPassword: '' })
       setSelectedGoalId(null)
       setSelectedStatsGoalId(0)
       setGoalDetail(null)
@@ -626,6 +691,63 @@ function App() {
     } finally {
       handleAuthReset()
     }
+  }
+
+  async function updateProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setAccountMessage('')
+    setAccountError('')
+
+    const response = await apiFetch('/api/me', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: accountName }),
+    })
+
+    if (!response.ok) {
+      setAccountError(copy.profileError)
+      return
+    }
+
+    const user = (await response.json()) as AuthUser
+    setCurrentUser(user)
+    setAccountMessage(copy.profileSaved)
+  }
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setAccountMessage('')
+    setAccountError('')
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setAccountError(copy.passwordMismatch)
+      return
+    }
+    if (!isStrongPassword(passwordForm.newPassword)) {
+      setAccountError(copy.passwordPolicyError)
+      return
+    }
+
+    const response = await apiFetch('/api/me/password', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      }),
+    })
+
+    if (!response.ok) {
+      setAccountError(copy.passwordChangeError)
+      return
+    }
+
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+    setAccountMessage(copy.passwordChanged)
   }
 
   async function loadGoals(token = authToken) {
@@ -931,33 +1053,37 @@ function App() {
       <section className="phone-shell" aria-label="Progress Tracker">
         <div className="screen-content">
           <header className="top-bar">
-            <button
-              className={`icon-button ${selectedGoalId ? 'icon-button--back' : 'icon-button--menu'}`}
-              type="button"
-              aria-label={selectedGoalId ? copy.backToGoals : copy.openSettings}
-              onClick={() => {
-                if (selectedGoalId) {
-                  setSelectedGoalId(null)
-                  setGoalDetail(null)
-                  setIsEditingGoal(false)
-                  setEditingSessionId(null)
-                  resetSession()
-                  return
-                }
+            {currentUser ? (
+              <button
+                className={`icon-button ${selectedGoalId ? 'icon-button--back' : 'icon-button--menu'}`}
+                type="button"
+                aria-label={selectedGoalId ? copy.backToGoals : copy.openSettings}
+                onClick={() => {
+                  if (selectedGoalId) {
+                    setSelectedGoalId(null)
+                    setGoalDetail(null)
+                    setIsEditingGoal(false)
+                    setEditingSessionId(null)
+                    resetSession()
+                    return
+                  }
 
-                setSettingsOpen(true)
-              }}
-            >
-              {selectedGoalId ? (
-                <BackIcon />
-              ) : (
-                <>
-                  <span />
-                  <span />
-                  <span />
-                </>
-              )}
-            </button>
+                  setSettingsOpen(true)
+                }}
+              >
+                {selectedGoalId ? (
+                  <BackIcon />
+                ) : (
+                  <>
+                    <span />
+                    <span />
+                    <span />
+                  </>
+                )}
+              </button>
+            ) : (
+              <span />
+            )}
             <p>{screenTitle}</p>
             <span
               className={`connection-dot connection-dot--${backendStatus}`}
@@ -1121,12 +1247,20 @@ function App() {
         )}
 
         <SettingsDrawer
-          isOpen={settingsOpen}
+          isOpen={Boolean(currentUser && settingsOpen)}
           settings={settings}
           currentUser={currentUser}
+          accountName={accountName}
+          passwordForm={passwordForm}
+          accountMessage={accountMessage}
+          accountError={accountError}
           copy={copy}
           onClose={() => setSettingsOpen(false)}
           onChange={(nextSettings) => setSettings((current) => ({ ...current, ...nextSettings }))}
+          onAccountNameChange={setAccountName}
+          onPasswordFormChange={setPasswordForm}
+          onProfileSubmit={updateProfile}
+          onPasswordSubmit={changePassword}
           onLogout={handleLogout}
         />
       </section>
@@ -1152,6 +1286,7 @@ function AuthScreen({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
   const isRegister = mode === 'register'
+  const [showPassword, setShowPassword] = useState(false)
 
   return (
     <section className="auth-screen">
@@ -1189,15 +1324,47 @@ function AuthScreen({
 
         <label>
           {copy.password}
-          <input
-            type="password"
-            autoComplete={isRegister ? 'new-password' : 'current-password'}
-            minLength={8}
-            required
-            value={form.password}
-            onChange={(event) => onChange({ ...form, password: event.target.value })}
-          />
+          <span className="password-field">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
+              minLength={8}
+              required
+              value={form.password}
+              onChange={(event) => onChange({ ...form, password: event.target.value })}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? copy.hidePassword : copy.showPassword}
+              onClick={() => setShowPassword((current) => !current)}
+            >
+              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </span>
         </label>
+
+        {isRegister && (
+          <label>
+            {copy.confirmPassword}
+            <span className="password-field">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={form.confirmPassword}
+                onChange={(event) => onChange({ ...form, confirmPassword: event.target.value })}
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? copy.hidePassword : copy.showPassword}
+                onClick={() => setShowPassword((current) => !current)}
+              >
+                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+              </button>
+            </span>
+          </label>
+        )}
 
         <span className="form-hint">{copy.passwordHint}</span>
         {error && <p className="form-error">{error}</p>}
@@ -1222,17 +1389,33 @@ function SettingsDrawer({
   isOpen,
   settings,
   currentUser,
+  accountName,
+  passwordForm,
+  accountMessage,
+  accountError,
   copy,
   onClose,
   onChange,
+  onAccountNameChange,
+  onPasswordFormChange,
+  onProfileSubmit,
+  onPasswordSubmit,
   onLogout,
 }: {
   isOpen: boolean
   settings: AppSettings
   currentUser: AuthUser | null
+  accountName: string
+  passwordForm: PasswordForm
+  accountMessage: string
+  accountError: string
   copy: Copy
   onClose: () => void
   onChange: (settings: Partial<AppSettings>) => void
+  onAccountNameChange: (name: string) => void
+  onPasswordFormChange: (form: PasswordForm) => void
+  onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => void
   onLogout: () => void
 }) {
   if (!isOpen) {
@@ -1262,6 +1445,63 @@ function SettingsDrawer({
             <div className="about-list">
               <p><span>{copy.signedInAs}</span><strong>{currentUser.email}</strong></p>
             </div>
+
+            <form className="settings-form" onSubmit={onProfileSubmit}>
+              <label>
+                {copy.displayName}
+                <input
+                  type="text"
+                  value={accountName}
+                  onChange={(event) => onAccountNameChange(event.target.value)}
+                />
+              </label>
+              <button className="ghost-button" type="submit">
+                {copy.saveProfile}
+              </button>
+            </form>
+
+            <form className="settings-form" onSubmit={onPasswordSubmit}>
+              <label>
+                {copy.currentPassword}
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => onPasswordFormChange({ ...passwordForm, currentPassword: event.target.value })}
+                />
+              </label>
+              <label>
+                {copy.newPassword}
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  value={passwordForm.newPassword}
+                  onChange={(event) => onPasswordFormChange({ ...passwordForm, newPassword: event.target.value })}
+                />
+              </label>
+              <label>
+                {copy.confirmPassword}
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) => onPasswordFormChange({ ...passwordForm, confirmPassword: event.target.value })}
+                />
+              </label>
+              <p className="settings-note">{copy.passwordHint}</p>
+              <button className="ghost-button" type="submit">
+                {copy.changePassword}
+              </button>
+            </form>
+
+            {accountMessage && <p className="settings-success">{accountMessage}</p>}
+            {accountError && <p className="form-error">{accountError}</p>}
+
             <button className="ghost-button" type="button" onClick={onLogout}>
               {copy.logout}
             </button>
@@ -2334,6 +2574,13 @@ function percent(value: number, total: number) {
   return Math.min(Math.round((value / total) * 100), 100)
 }
 
+function isStrongPassword(password: string) {
+  return password.length >= 8
+    && /[A-Z]/.test(password)
+    && /\d/.test(password)
+    && /[^A-Za-z0-9]/.test(password)
+}
+
 function FlameIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2363,6 +2610,26 @@ function BackIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M15 6l-6 6 6 6" />
+    </svg>
+  )
+}
+
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+      <path d="M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+    </svg>
+  )
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6a2.5 2.5 0 0 0 2.8 2.8" />
+      <path d="M9.4 5.3A9.7 9.7 0 0 1 12 5c6 0 9.5 7 9.5 7a16 16 0 0 1-3 3.7" />
+      <path d="M6.4 6.8C3.9 8.5 2.5 12 2.5 12s3.5 7 9.5 7c1.5 0 2.8-.4 4-1" />
     </svg>
   )
 }

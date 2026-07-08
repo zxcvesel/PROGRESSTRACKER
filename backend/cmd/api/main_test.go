@@ -268,7 +268,7 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 	registerRequest := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{
 		"email":"learner@example.com",
 		"name":"Learner",
-		"password":"password123"
+		"password":"Password123!"
 	}`))
 	registerResponse := httptest.NewRecorder()
 
@@ -288,7 +288,7 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{
 		"email":"learner@example.com",
-		"password":"password123"
+		"password":"Password123!"
 	}`))
 	loginResponse := httptest.NewRecorder()
 
@@ -344,6 +344,78 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 	}
 	if len(otherGoals) != 0 {
 		t.Fatalf("other goals count = %d, want 0", len(otherGoals))
+	}
+}
+
+func TestChangePasswordKeepsAuthOnWrongCurrentPassword(t *testing.T) {
+	setupTestDatabase(t)
+
+	registerRequest := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{
+		"email":"password@example.com",
+		"name":"Password Test",
+		"password":"Password123!"
+	}`))
+	registerResponse := httptest.NewRecorder()
+
+	registerHandler(registerResponse, registerRequest)
+
+	if registerResponse.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, body = %s", registerResponse.Code, registerResponse.Body.String())
+	}
+
+	var auth AuthResponse
+	if err := json.NewDecoder(registerResponse.Body).Decode(&auth); err != nil {
+		t.Fatal(err)
+	}
+
+	wrongPasswordRequest := httptest.NewRequest(http.MethodPatch, "/me/password", strings.NewReader(`{
+		"currentPassword":"WrongPassword123!",
+		"newPassword":"NewPassword123!"
+	}`))
+	wrongPasswordRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	wrongPasswordResponse := httptest.NewRecorder()
+
+	changePasswordHandler(wrongPasswordResponse, wrongPasswordRequest)
+
+	if wrongPasswordResponse.Code != http.StatusBadRequest {
+		t.Fatalf("wrong current password status = %d, want %d", wrongPasswordResponse.Code, http.StatusBadRequest)
+	}
+
+	correctPasswordRequest := httptest.NewRequest(http.MethodPatch, "/me/password", strings.NewReader(`{
+		"currentPassword":"Password123!",
+		"newPassword":"NewPassword123!"
+	}`))
+	correctPasswordRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	correctPasswordResponse := httptest.NewRecorder()
+
+	changePasswordHandler(correctPasswordResponse, correctPasswordRequest)
+
+	if correctPasswordResponse.Code != http.StatusNoContent {
+		t.Fatalf("correct current password status = %d, want %d", correctPasswordResponse.Code, http.StatusNoContent)
+	}
+
+	oldLoginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{
+		"email":"password@example.com",
+		"password":"Password123!"
+	}`))
+	oldLoginResponse := httptest.NewRecorder()
+
+	loginHandler(oldLoginResponse, oldLoginRequest)
+
+	if oldLoginResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("old password login status = %d, want %d", oldLoginResponse.Code, http.StatusUnauthorized)
+	}
+
+	newLoginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{
+		"email":"password@example.com",
+		"password":"NewPassword123!"
+	}`))
+	newLoginResponse := httptest.NewRecorder()
+
+	loginHandler(newLoginResponse, newLoginRequest)
+
+	if newLoginResponse.Code != http.StatusOK {
+		t.Fatalf("new password login status = %d, body = %s", newLoginResponse.Code, newLoginResponse.Body.String())
 	}
 }
 

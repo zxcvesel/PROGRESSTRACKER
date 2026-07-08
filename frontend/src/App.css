@@ -469,7 +469,8 @@
   font-weight: 700;
 }
 
-.auth-form input {
+.auth-form input,
+.password-field input {
   min-height: 46px;
   padding: 0 13px;
   border: 1px solid rgba(var(--accent-rgb), 0.12);
@@ -479,9 +480,36 @@
   outline: none;
 }
 
-.auth-form input:focus {
+.auth-form input:focus,
+.password-field input:focus {
   border-color: rgba(var(--accent-rgb), 0.55);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.password-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
+.password-field button {
+  display: grid;
+  min-height: 46px;
+  place-items: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 12px;
+  color: var(--text-strong);
+  background: var(--field-bg);
+}
+
+.password-field svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .form-hint {
@@ -1403,6 +1431,17 @@
 .settings-note {
   color: var(--muted);
   font-size: 12px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-success {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .about-list {

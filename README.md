@@ -37,6 +37,9 @@ Frontend работает через Vite development server и отправля
 
 ## Current Features
 
+- Register, sign in, sign out, and manage a local account.
+- Store user goals, sessions, progress, calendar, and statistics separately per account.
+- Update display name and change password from settings.
 - Create, edit, and delete long-term goals.
 - Set total goal duration and daily target time.
 - Start, pause, resume, and finish practice sessions.
@@ -45,9 +48,13 @@ Frontend работает через Vite development server и отправля
 - View, edit, and delete session history.
 - Track today's progress, total goal progress, current streak, and longest streak.
 - View basic statistics with weekly activity, monthly total, and goal time distribution.
+- Personalize the app with language, theme, accent color, font size, and default goal settings.
 
 ## Текущий функционал
 
+- Регистрация, вход, выход и управление локальным аккаунтом.
+- Раздельное хранение целей, сессий, прогресса, календаря и статистики для каждого аккаунта.
+- Изменение имени и смена пароля в настройках.
 - Создание, редактирование и удаление долгосрочных целей.
 - Настройка общей длительности цели и ежедневной нормы времени.
 - Запуск, пауза, продолжение и завершение сессий практики.
@@ -56,6 +63,23 @@ Frontend работает через Vite development server и отправля
 - Просмотр, редактирование и удаление истории сессий.
 - Отслеживание прогресса за сегодня, общего прогресса цели, текущей и лучшей серии.
 - Базовая статистика с недельной активностью, итогом за месяц и распределением времени по целям.
+- Настройка языка, темы, цвета акцента, размера шрифта и значений цели по умолчанию.
+
+## Account and Security
+
+- Passwords are not stored as plain text.
+- The backend stores password hashes with a unique salt.
+- Login sessions use Bearer tokens.
+- The database stores only token hashes, not raw tokens.
+- Password rules require at least 8 characters, an uppercase letter, a number, and a special character.
+
+## Аккаунт и безопасность
+
+- Пароли не хранятся в открытом виде.
+- Backend хранит хэши паролей с уникальной солью.
+- Сессии входа работают через Bearer-токены.
+- В базе хранятся только хэши токенов, а не сами токены.
+- Правила пароля требуют минимум 8 символов, заглавную букву, цифру и спецсимвол.
 
 ## Progress Rules
 
@@ -84,16 +108,16 @@ Frontend работает через Vite development server и отправля
 
 ## Development Status
 
-Implemented: goals, session timer, history, streaks, basic statistics, and mobile dark UI.
+Implemented: accounts, authentication, account settings, goals, session timer, history, streaks, basic statistics, calendar, and mobile dark UI.
 
-Not implemented yet: user accounts, authentication, settings, language switching, deployment setup, and final statistics polish.
+Not implemented yet: password reset by email, email change, account deletion, deployment setup, rate limiting, and final statistics polish.
 
 The temporary timer speed control is used only for manual testing during development.
 
 ## Статус разработки
 
-Реализовано: цели, таймер сессий, история, серии, базовая статистика и темный мобильный интерфейс.
+Реализовано: аккаунты, авторизация, настройки аккаунта, цели, таймер сессий, история, серии, базовая статистика, календарь и темный мобильный интерфейс.
 
-Пока не реализовано: аккаунты пользователей, авторизация, настройки, смена языка, настройка деплоя и финальная доработка статистики.
+Пока не реализовано: сброс пароля через email, смена email, удаление аккаунта, настройка деплоя, rate limiting и финальная доработка статистики.
 
 Временное управление скоростью таймера используется только для ручного тестирования во время разработки.

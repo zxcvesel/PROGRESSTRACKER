@@ -46,6 +46,15 @@ type AuthRequest struct {
 	Password string `json:"password"`
 }
 
+type UpdateProfileRequest struct {
+	Name string `json:"name"`
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
 type AuthResponse struct {
 	User  User   `json:"user"`
 	Token string `json:"token"`
@@ -185,6 +194,8 @@ func main() {
 	mux.HandleFunc("POST /auth/login", loginHandler)
 	mux.HandleFunc("POST /auth/logout", logoutHandler)
 	mux.HandleFunc("GET /me", meHandler)
+	mux.HandleFunc("PATCH /me", updateMeHandler)
+	mux.HandleFunc("PATCH /me/password", changePasswordHandler)
 	mux.HandleFunc("GET /entries", entriesHandler)
 	mux.HandleFunc("POST /entries", createEntryHandler)
 	mux.HandleFunc("GET /goals", goalsHandler)
@@ -225,8 +236,8 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "valid email is required", http.StatusBadRequest)
 		return
 	}
-	if len(request.Password) < 8 {
-		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+	if !isStrongPassword(request.Password) {
+		http.Error(w, "password must include uppercase letters, numbers, and special characters", http.StatusBadRequest)
 		return
 	}
 
@@ -314,6 +325,71 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, user, http.StatusOK)
+}
+
+func updateMeHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := currentUserFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	var request UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	name := strings.TrimSpace(request.Name)
+	_, err := db.Exec(`UPDATE users SET name = ? WHERE id = ?`, name, user.ID)
+	if err != nil {
+		http.Error(w, "failed to update profile", http.StatusInternalServerError)
+		return
+	}
+
+	user.Name = name
+	writeJSON(w, user, http.StatusOK)
+}
+
+func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := currentUserFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	var request ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	fullUser, err := loadUserByEmail(user.Email)
+	if err != nil {
+		http.Error(w, "failed to load user", http.StatusInternalServerError)
+		return
+	}
+	if !verifyPassword(request.CurrentPassword, fullUser.PasswordHash) {
+		http.Error(w, "current password is incorrect", http.StatusBadRequest)
+		return
+	}
+	if !isStrongPassword(request.NewPassword) {
+		http.Error(w, "password must include uppercase letters, numbers, and special characters", http.StatusBadRequest)
+		return
+	}
+
+	passwordHash, err := hashPassword(request.NewPassword)
+	if err != nil {
+		http.Error(w, "failed to protect password", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, user.ID)
+	if err != nil {
+		http.Error(w, "failed to change password", http.StatusInternalServerError)
+		return
+	}
+
+	_, _ = db.Exec(`DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?`, user.ID, tokenHashFromRequest(r))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func openDatabase() (*sql.DB, error) {
@@ -1830,6 +1906,38 @@ func randomToken(size int) (string, error) {
 func tokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func tokenHashFromRequest(r *http.Request) string {
+	token, ok := bearerToken(r)
+	if !ok {
+		return ""
+	}
+	return tokenHash(token)
+}
+
+func isStrongPassword(password string) bool {
+	if len(password) < 8 {
+		return false
+	}
+
+	hasUpper := false
+	hasDigit := false
+	hasSpecial := false
+	for _, char := range password {
+		switch {
+		case char >= 'A' && char <= 'Z':
+			hasUpper = true
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		case (char >= 'a' && char <= 'z') || char == ' ':
+			continue
+		default:
+			hasSpecial = true
+		}
+	}
+
+	return hasUpper && hasDigit && hasSpecial
 }
 
 func hashPassword(password string) (string, error) {
