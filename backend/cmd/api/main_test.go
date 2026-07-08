@@ -55,6 +55,19 @@ func testAuthToken(t *testing.T) string {
 	return token
 }
 
+func authCookieValue(t *testing.T, response *httptest.ResponseRecorder) string {
+	t.Helper()
+
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == authCookieName {
+			return cookie.Value
+		}
+	}
+
+	t.Fatal("auth cookie was not set")
+	return ""
+}
+
 func TestCalculateGoalStreaksUsesCalendarDays(t *testing.T) {
 	setupTestDatabase(t)
 
@@ -282,8 +295,9 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 	if err := json.NewDecoder(registerResponse.Body).Decode(&auth); err != nil {
 		t.Fatal(err)
 	}
-	if auth.Token == "" || auth.User.ID == 0 {
-		t.Fatalf("auth response = %+v, want token and user", auth)
+	token := authCookieValue(t, registerResponse)
+	if token == "" || auth.User.ID == 0 {
+		t.Fatalf("auth response = %+v, want cookie token and user", auth)
 	}
 
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{
@@ -303,7 +317,7 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 		"totalDays":30,
 		"dailyTargetMinutes":20
 	}`))
-	createGoalRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	createGoalRequest.AddCookie(&http.Cookie{Name: authCookieName, Value: token})
 	createGoalResponse := httptest.NewRecorder()
 
 	createGoalHandler(createGoalResponse, createGoalRequest)
@@ -313,7 +327,7 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 	}
 
 	ownerGoalsRequest := httptest.NewRequest(http.MethodGet, "/goals", nil)
-	ownerGoalsRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	ownerGoalsRequest.AddCookie(&http.Cookie{Name: authCookieName, Value: token})
 	ownerGoalsResponse := httptest.NewRecorder()
 
 	goalsHandler(ownerGoalsResponse, ownerGoalsRequest)
@@ -372,7 +386,8 @@ func TestChangePasswordKeepsAuthOnWrongCurrentPassword(t *testing.T) {
 		"currentPassword":"WrongPassword123!",
 		"newPassword":"NewPassword123!"
 	}`))
-	wrongPasswordRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	token := authCookieValue(t, registerResponse)
+	wrongPasswordRequest.AddCookie(&http.Cookie{Name: authCookieName, Value: token})
 	wrongPasswordResponse := httptest.NewRecorder()
 
 	changePasswordHandler(wrongPasswordResponse, wrongPasswordRequest)
@@ -385,7 +400,7 @@ func TestChangePasswordKeepsAuthOnWrongCurrentPassword(t *testing.T) {
 		"currentPassword":"Password123!",
 		"newPassword":"NewPassword123!"
 	}`))
-	correctPasswordRequest.Header.Set("Authorization", "Bearer "+auth.Token)
+	correctPasswordRequest.AddCookie(&http.Cookie{Name: authCookieName, Value: token})
 	correctPasswordResponse := httptest.NewRecorder()
 
 	changePasswordHandler(correctPasswordResponse, correctPasswordRequest)

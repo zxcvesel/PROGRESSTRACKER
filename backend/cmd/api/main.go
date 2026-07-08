@@ -1,15 +1,8 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -26,11 +19,18 @@ var db *sql.DB
 
 const (
 	authTokenLifetime = 30 * 24 * time.Hour
-	passwordHashName  = "pbkdf2_sha256"
+	authCookieName    = "progress_tracker_session"
+	passwordHashName  = "argon2id"
 	passwordKeyBytes  = 32
 	passwordSaltBytes = 16
-	passwordRounds    = 120000
+	passwordMemory    = 64 * 1024
+	passwordTime      = 3
+	passwordThreads   = 1
+	legacyHashName    = "pbkdf2_sha256"
+	legacyRounds      = 120000
 )
+
+var authRateLimiter = newRateLimiter(12, 10*time.Minute)
 
 type User struct {
 	ID           int    `json:"id"`
@@ -56,8 +56,11 @@ type ChangePasswordRequest struct {
 }
 
 type AuthResponse struct {
-	User  User   `json:"user"`
-	Token string `json:"token"`
+	User User `json:"user"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
 }
 
 type Entry struct {
@@ -223,175 +226,6 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"}, http.StatusOK)
 }
 
-func registerHandler(w http.ResponseWriter, r *http.Request) {
-	var request AuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	email := normalizeEmail(request.Email)
-	name := strings.TrimSpace(request.Name)
-	if email == "" || !strings.Contains(email, "@") {
-		http.Error(w, "valid email is required", http.StatusBadRequest)
-		return
-	}
-	if !isStrongPassword(request.Password) {
-		http.Error(w, "password must include uppercase letters, numbers, and special characters", http.StatusBadRequest)
-		return
-	}
-
-	passwordHash, err := hashPassword(request.Password)
-	if err != nil {
-		http.Error(w, "failed to protect password", http.StatusInternalServerError)
-		return
-	}
-
-	createdAt := time.Now().Format(time.RFC3339)
-	result, err := db.Exec(`
-		INSERT INTO users (email, name, password_hash, created_at)
-		VALUES (?, ?, ?, ?)
-	`, email, name, passwordHash, createdAt)
-	if err != nil {
-		http.Error(w, "user already exists", http.StatusConflict)
-		return
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		http.Error(w, "failed to read created user", http.StatusInternalServerError)
-		return
-	}
-
-	user := User{
-		ID:        int(id),
-		Email:     email,
-		Name:      name,
-		CreatedAt: createdAt,
-	}
-	token, err := createAuthSession(user.ID)
-	if err != nil {
-		http.Error(w, "failed to create session", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, AuthResponse{User: user, Token: token}, http.StatusCreated)
-}
-
-func loginHandler(w http.ResponseWriter, r *http.Request) {
-	var request AuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	user, err := loadUserByEmail(normalizeEmail(request.Email))
-	if err == sql.ErrNoRows {
-		http.Error(w, "invalid email or password", http.StatusUnauthorized)
-		return
-	}
-	if err != nil {
-		http.Error(w, "failed to load user", http.StatusInternalServerError)
-		return
-	}
-	if !verifyPassword(request.Password, user.PasswordHash) {
-		http.Error(w, "invalid email or password", http.StatusUnauthorized)
-		return
-	}
-
-	user.PasswordHash = ""
-	token, err := createAuthSession(user.ID)
-	if err != nil {
-		http.Error(w, "failed to create session", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, AuthResponse{User: user, Token: token}, http.StatusOK)
-}
-
-func logoutHandler(w http.ResponseWriter, r *http.Request) {
-	token, ok := bearerToken(r)
-	if ok {
-		_, _ = db.Exec(`DELETE FROM auth_sessions WHERE token_hash = ?`, tokenHash(token))
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func meHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	writeJSON(w, user, http.StatusOK)
-}
-
-func updateMeHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	var request UpdateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	name := strings.TrimSpace(request.Name)
-	_, err := db.Exec(`UPDATE users SET name = ? WHERE id = ?`, name, user.ID)
-	if err != nil {
-		http.Error(w, "failed to update profile", http.StatusInternalServerError)
-		return
-	}
-
-	user.Name = name
-	writeJSON(w, user, http.StatusOK)
-}
-
-func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	var request ChangePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	fullUser, err := loadUserByEmail(user.Email)
-	if err != nil {
-		http.Error(w, "failed to load user", http.StatusInternalServerError)
-		return
-	}
-	if !verifyPassword(request.CurrentPassword, fullUser.PasswordHash) {
-		http.Error(w, "current password is incorrect", http.StatusBadRequest)
-		return
-	}
-	if !isStrongPassword(request.NewPassword) {
-		http.Error(w, "password must include uppercase letters, numbers, and special characters", http.StatusBadRequest)
-		return
-	}
-
-	passwordHash, err := hashPassword(request.NewPassword)
-	if err != nil {
-		http.Error(w, "failed to protect password", http.StatusInternalServerError)
-		return
-	}
-
-	_, err = db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, user.ID)
-	if err != nil {
-		http.Error(w, "failed to change password", http.StatusInternalServerError)
-		return
-	}
-
-	_, _ = db.Exec(`DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?`, user.ID, tokenHashFromRequest(r))
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func openDatabase() (*sql.DB, error) {
 	dbPath := os.Getenv("PROGRESS_TRACKER_DB_PATH")
 	if dbPath == "" {
@@ -506,7 +340,7 @@ func entriesHandler(w http.ResponseWriter, r *http.Request) {
 		ORDER BY date DESC, id DESC
 	`, user.ID)
 	if err != nil {
-		http.Error(w, "failed to load entries", http.StatusInternalServerError)
+		writeError(w, "failed to load entries", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -515,7 +349,7 @@ func entriesHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var entry Entry
 		if err := rows.Scan(&entry.ID, &entry.Date, &entry.Category, &entry.Minutes, &entry.Note); err != nil {
-			http.Error(w, "failed to read entry", http.StatusInternalServerError)
+			writeError(w, "failed to read entry", http.StatusInternalServerError)
 			return
 		}
 
@@ -523,7 +357,7 @@ func entriesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := rows.Err(); err != nil {
-		http.Error(w, "failed to load entries", http.StatusInternalServerError)
+		writeError(w, "failed to load entries", http.StatusInternalServerError)
 		return
 	}
 
@@ -538,12 +372,12 @@ func createEntryHandler(w http.ResponseWriter, r *http.Request) {
 
 	var entry Entry
 	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeError(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if entry.Date == "" || entry.Category == "" || entry.Minutes <= 0 {
-		http.Error(w, "date, category, and positive minutes are required", http.StatusBadRequest)
+		writeError(w, "date, category, and positive minutes are required", http.StatusBadRequest)
 		return
 	}
 
@@ -552,554 +386,18 @@ func createEntryHandler(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?)
 	`, entry.Date, entry.Category, entry.Minutes, entry.Note, user.ID)
 	if err != nil {
-		http.Error(w, "failed to save entry", http.StatusInternalServerError)
+		writeError(w, "failed to save entry", http.StatusInternalServerError)
 		return
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		http.Error(w, "failed to read created entry", http.StatusInternalServerError)
+		writeError(w, "failed to read created entry", http.StatusInternalServerError)
 		return
 	}
 
 	entry.ID = int(id)
 	writeJSON(w, entry, http.StatusCreated)
-}
-
-func goalsHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	goals, err := loadGoals(user.ID)
-	if err != nil {
-		http.Error(w, "failed to load goals", http.StatusInternalServerError)
-		return
-	}
-
-	summaries := make([]GoalSummary, 0, len(goals))
-	for _, goal := range goals {
-		summary, err := buildGoalSummary(goal)
-		if err != nil {
-			http.Error(w, "failed to load goal summary", http.StatusInternalServerError)
-			return
-		}
-		summaries = append(summaries, summary)
-	}
-
-	writeJSON(w, summaries, http.StatusOK)
-}
-
-func createGoalHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	var request CreateGoalRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	if request.Title == "" || request.TotalDays <= 0 || request.DailyTargetMinutes <= 0 {
-		http.Error(w, "title, totalDays, and dailyTargetMinutes are required", http.StatusBadRequest)
-		return
-	}
-
-	if len(request.ActiveWeekdays) == 0 {
-		request.ActiveWeekdays = []int{1, 2, 3, 4, 5, 6, 7}
-	}
-
-	if request.StartDate == "" {
-		request.StartDate = todayString()
-	}
-
-	createdAt := time.Now().Format(time.RFC3339)
-	result, err := db.Exec(`
-		INSERT INTO goals (
-			title, description, total_days, daily_target_minutes,
-			active_weekdays, start_date, created_at, status, user_id
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
-	`, request.Title, request.Description, request.TotalDays, request.DailyTargetMinutes, weekdaysToString(request.ActiveWeekdays), request.StartDate, createdAt, user.ID)
-	if err != nil {
-		http.Error(w, "failed to create goal", http.StatusInternalServerError)
-		return
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		http.Error(w, "failed to read created goal", http.StatusInternalServerError)
-		return
-	}
-
-	goal := Goal{
-		ID:                 int(id),
-		UserID:             user.ID,
-		Title:              request.Title,
-		Description:        request.Description,
-		TotalDays:          request.TotalDays,
-		DailyTargetMinutes: request.DailyTargetMinutes,
-		ActiveWeekdays:     request.ActiveWeekdays,
-		StartDate:          request.StartDate,
-		CreatedAt:          createdAt,
-		Status:             "active",
-	}
-
-	if err := refreshDailyProgressForGoal(goal); err != nil {
-		http.Error(w, "failed to initialize goal progress", http.StatusInternalServerError)
-		return
-	}
-
-	summary, err := buildGoalSummary(goal)
-	if err != nil {
-		http.Error(w, "failed to load created goal", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, summary, http.StatusCreated)
-}
-
-func goalDetailHandler(w http.ResponseWriter, r *http.Request) {
-	goal, ok := loadGoalFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	summary, err := buildGoalSummary(goal)
-	if err != nil {
-		http.Error(w, "failed to load goal summary", http.StatusInternalServerError)
-		return
-	}
-
-	sessions, err := loadSessions(goal.ID, 12)
-	if err != nil {
-		http.Error(w, "failed to load sessions", http.StatusInternalServerError)
-		return
-	}
-
-	calendar, err := loadCalendarStats(goal.ID, goal.UserID, 42)
-	if err != nil {
-		http.Error(w, "failed to load calendar", http.StatusInternalServerError)
-		return
-	}
-
-	detail := GoalDetail{
-		GoalSummary:           summary,
-		TodayRemainingMinutes: max(goal.DailyTargetMinutes-summary.TodayMinutes, 0),
-		RecentSessions:        sessions,
-		Calendar:              calendar,
-	}
-
-	writeJSON(w, detail, http.StatusOK)
-}
-
-func updateGoalHandler(w http.ResponseWriter, r *http.Request) {
-	goal, ok := loadGoalFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	var request UpdateGoalRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	if request.Title == "" || request.TotalDays <= 0 || request.DailyTargetMinutes <= 0 {
-		http.Error(w, "title, totalDays, and dailyTargetMinutes are required", http.StatusBadRequest)
-		return
-	}
-
-	if request.Status == "" {
-		request.Status = goal.Status
-	}
-	if request.Status != "active" && request.Status != "completed" {
-		http.Error(w, "status must be active or completed", http.StatusBadRequest)
-		return
-	}
-
-	_, err := db.Exec(`
-		UPDATE goals
-		SET title = ?, description = ?, total_days = ?, daily_target_minutes = ?, status = ?
-		WHERE id = ?
-	`, request.Title, request.Description, request.TotalDays, request.DailyTargetMinutes, request.Status, goal.ID)
-	if err != nil {
-		http.Error(w, "failed to update goal", http.StatusInternalServerError)
-		return
-	}
-
-	updatedGoal, err := loadGoal(goal.ID, goal.UserID)
-	if err != nil {
-		http.Error(w, "failed to load updated goal", http.StatusInternalServerError)
-		return
-	}
-
-	if err := refreshDailyProgressForGoal(updatedGoal); err != nil {
-		http.Error(w, "failed to refresh goal progress", http.StatusInternalServerError)
-		return
-	}
-
-	summary, err := buildGoalSummary(updatedGoal)
-	if err != nil {
-		http.Error(w, "failed to load updated goal summary", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, summary, http.StatusOK)
-}
-
-func deleteGoalHandler(w http.ResponseWriter, r *http.Request) {
-	goal, ok := loadGoalFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "failed to start delete", http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`DELETE FROM sessions WHERE goal_id = ?`, goal.ID); err != nil {
-		http.Error(w, "failed to delete goal sessions", http.StatusInternalServerError)
-		return
-	}
-
-	if _, err := tx.Exec(`DELETE FROM daily_progress WHERE goal_id = ?`, goal.ID); err != nil {
-		http.Error(w, "failed to delete goal progress", http.StatusInternalServerError)
-		return
-	}
-
-	if _, err := tx.Exec(`DELETE FROM goals WHERE id = ?`, goal.ID); err != nil {
-		http.Error(w, "failed to delete goal", http.StatusInternalServerError)
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
-		http.Error(w, "failed to finish delete", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func createSessionHandler(w http.ResponseWriter, r *http.Request) {
-	goal, ok := loadGoalFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	var request CreateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	if request.StartedAt == "" || request.EndedAt == "" || request.DurationMinutes <= 0 {
-		http.Error(w, "startedAt, endedAt, and positive durationMinutes are required", http.StatusBadRequest)
-		return
-	}
-
-	sessionDate := sessionDateString(request.EndedAt)
-	createdAt := time.Now().Format(time.RFC3339)
-	existingSession, hasExistingSession, err := loadSessionForDate(goal.ID, sessionDate)
-	if err != nil {
-		http.Error(w, "failed to load daily session", http.StatusInternalServerError)
-		return
-	}
-
-	if hasExistingSession {
-		updatedNotes := mergeSessionNotes(existingSession.Notes, request.Notes)
-		updatedTags := mergeTags(existingSession.Tags, request.Tags)
-		_, err := db.Exec(`
-			UPDATE sessions
-			SET ended_at = ?, duration_minutes = ?, notes = ?, tags = ?
-			WHERE id = ? AND goal_id = ?
-		`, request.EndedAt, existingSession.DurationMinutes+request.DurationMinutes, updatedNotes, tagsToString(updatedTags), existingSession.ID, goal.ID)
-		if err != nil {
-			http.Error(w, "failed to update daily session", http.StatusInternalServerError)
-			return
-		}
-
-		session, err := loadSession(goal.ID, existingSession.ID)
-		if err != nil {
-			http.Error(w, "failed to load daily session", http.StatusInternalServerError)
-			return
-		}
-
-		if err := refreshDailyProgressForGoal(goal); err != nil {
-			http.Error(w, "failed to refresh daily progress", http.StatusInternalServerError)
-			return
-		}
-
-		writeJSON(w, session, http.StatusOK)
-		return
-	}
-
-	result, err := db.Exec(`
-		INSERT INTO sessions (
-			goal_id, started_at, ended_at, duration_minutes,
-			notes, tags, created_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, goal.ID, request.StartedAt, request.EndedAt, request.DurationMinutes, request.Notes, tagsToString(request.Tags), createdAt)
-	if err != nil {
-		http.Error(w, "failed to save session", http.StatusInternalServerError)
-		return
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		http.Error(w, "failed to read created session", http.StatusInternalServerError)
-		return
-	}
-
-	session := Session{
-		ID:              int(id),
-		GoalID:          goal.ID,
-		StartedAt:       request.StartedAt,
-		EndedAt:         request.EndedAt,
-		DurationMinutes: request.DurationMinutes,
-		Notes:           request.Notes,
-		Tags:            cleanTags(request.Tags),
-		CreatedAt:       createdAt,
-	}
-
-	if err := refreshDailyProgressForGoal(goal); err != nil {
-		http.Error(w, "failed to refresh daily progress", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, session, http.StatusCreated)
-}
-
-func updateSessionHandler(w http.ResponseWriter, r *http.Request) {
-	goal, ok := loadGoalFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	sessionID, ok := sessionIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	var request UpdateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	result, err := db.Exec(`
-		UPDATE sessions
-		SET notes = ?, tags = ?
-		WHERE id = ? AND goal_id = ?
-	`, request.Notes, tagsToString(request.Tags), sessionID, goal.ID)
-	if err != nil {
-		http.Error(w, "failed to update session", http.StatusInternalServerError)
-		return
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		http.Error(w, "failed to read updated session", http.StatusInternalServerError)
-		return
-	}
-	if affected == 0 {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	session, err := loadSession(goal.ID, sessionID)
-	if err != nil {
-		http.Error(w, "failed to load updated session", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, session, http.StatusOK)
-}
-
-func deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	goal, ok := loadGoalFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	sessionID, ok := sessionIDFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	result, err := db.Exec(`DELETE FROM sessions WHERE id = ? AND goal_id = ?`, sessionID, goal.ID)
-	if err != nil {
-		http.Error(w, "failed to delete session", http.StatusInternalServerError)
-		return
-	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		http.Error(w, "failed to read deleted session", http.StatusInternalServerError)
-		return
-	}
-	if affected == 0 {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-
-	if err := refreshDailyProgressForGoal(goal); err != nil {
-		http.Error(w, "failed to refresh daily progress", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func statsHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
-	if !ok {
-		return
-	}
-
-	goals, err := loadGoals(user.ID)
-	if err != nil {
-		http.Error(w, "failed to load goals", http.StatusInternalServerError)
-		return
-	}
-
-	goalID, err := optionalGoalID(r)
-	if err != nil {
-		http.Error(w, "invalid goal id", http.StatusBadRequest)
-		return
-	}
-
-	if goalID != 0 {
-		if _, err := loadGoal(goalID, user.ID); err == sql.ErrNoRows {
-			http.Error(w, "goal not found", http.StatusNotFound)
-			return
-		} else if err != nil {
-			http.Error(w, "failed to load goal", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	totalSessions, totalMinutes, err := loadSessionTotals(goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load stats", http.StatusInternalServerError)
-		return
-	}
-
-	today := todayString()
-	todayMinutes, err := loadMinutesForDate(today, goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load today's stats", http.StatusInternalServerError)
-		return
-	}
-
-	dailyTarget := 0
-	currentStreak := 0
-	longestStreak := 0
-	goalTitle := ""
-	for _, goal := range goals {
-		if goalID != 0 && goal.ID != goalID {
-			continue
-		}
-
-		if goalID == goal.ID {
-			goalTitle = goal.Title
-		}
-
-		if goal.Status == "active" {
-			dailyTarget += goal.DailyTargetMinutes
-		}
-
-		current, longest, err := calculateGoalStreaks(goal)
-		if err != nil {
-			http.Error(w, "failed to load streaks", http.StatusInternalServerError)
-			return
-		}
-
-		currentStreak = max(currentStreak, current)
-		longestStreak = max(longestStreak, longest)
-	}
-
-	weekly, err := buildWeeklyStats(dailyTarget, goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load weekly stats", http.StatusInternalServerError)
-		return
-	}
-
-	completedDays, missedDays, completionRate, err := loadCompletionSummary(goalID, user.ID, "", "")
-	if err != nil {
-		http.Error(w, "failed to load completion stats", http.StatusInternalServerError)
-		return
-	}
-
-	weekStart := dateOnly(time.Now()).AddDate(0, 0, -6).Format(time.DateOnly)
-	weekEnd := todayString()
-	_, _, weeklyCompletionRate, err := loadCompletionSummary(goalID, user.ID, weekStart, weekEnd)
-	if err != nil {
-		http.Error(w, "failed to load weekly completion stats", http.StatusInternalServerError)
-		return
-	}
-
-	currentWeekMinutes, err := loadMinutesBetween(weekStart, weekEnd, goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load current week stats", http.StatusInternalServerError)
-		return
-	}
-
-	previousWeekStart := dateOnly(time.Now()).AddDate(0, 0, -13).Format(time.DateOnly)
-	previousWeekEnd := dateOnly(time.Now()).AddDate(0, 0, -7).Format(time.DateOnly)
-	previousWeekMinutes, err := loadMinutesBetween(previousWeekStart, previousWeekEnd, goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load previous week stats", http.StatusInternalServerError)
-		return
-	}
-
-	monthlyTotal, err := loadMonthlyTotal(goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load monthly stats", http.StatusInternalServerError)
-		return
-	}
-
-	distribution, err := loadGoalDistribution(totalMinutes, goalID, user.ID)
-	if err != nil {
-		http.Error(w, "failed to load distribution", http.StatusInternalServerError)
-		return
-	}
-
-	calendar, err := loadCalendarStats(goalID, user.ID, 42)
-	if err != nil {
-		http.Error(w, "failed to load calendar stats", http.StatusInternalServerError)
-		return
-	}
-
-	stats := Stats{
-		TotalSessions:        totalSessions,
-		TotalPracticeMinutes: totalMinutes,
-		CurrentStreak:        currentStreak,
-		LongestStreak:        longestStreak,
-		CompletedDays:        completedDays,
-		MissedDays:           missedDays,
-		CompletionRate:       completionRate,
-		WeeklyCompletionRate: weeklyCompletionRate,
-		PreviousWeekMinutes:  previousWeekMinutes,
-		WeekComparisonPct:    signedPercentChange(currentWeekMinutes, previousWeekMinutes),
-		TodayMinutes:         todayMinutes,
-		DailyTargetMinutes:   dailyTarget,
-		Weekly:               weekly,
-		Calendar:             calendar,
-		MonthlyTotalMinutes:  monthlyTotal,
-		GoalDistribution:     distribution,
-		GoalID:               goalID,
-		GoalTitle:            goalTitle,
-	}
-
-	writeJSON(w, stats, http.StatusOK)
 }
 
 func loadGoalFromRequest(w http.ResponseWriter, r *http.Request) (Goal, bool) {
@@ -1110,17 +408,17 @@ func loadGoalFromRequest(w http.ResponseWriter, r *http.Request) (Goal, bool) {
 
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "invalid goal id", http.StatusBadRequest)
+		writeError(w, "invalid goal id", http.StatusBadRequest)
 		return Goal{}, false
 	}
 
 	goal, err := loadGoal(id, user.ID)
 	if err == sql.ErrNoRows {
-		http.Error(w, "goal not found", http.StatusNotFound)
+		writeError(w, "goal not found", http.StatusNotFound)
 		return Goal{}, false
 	}
 	if err != nil {
-		http.Error(w, "failed to load goal", http.StatusInternalServerError)
+		writeError(w, "failed to load goal", http.StatusInternalServerError)
 		return Goal{}, false
 	}
 
@@ -1130,7 +428,7 @@ func loadGoalFromRequest(w http.ResponseWriter, r *http.Request) (Goal, bool) {
 func sessionIDFromRequest(w http.ResponseWriter, r *http.Request) (int, bool) {
 	id, err := strconv.Atoi(r.PathValue("sessionId"))
 	if err != nil {
-		http.Error(w, "invalid session id", http.StatusBadRequest)
+		writeError(w, "invalid session id", http.StatusBadRequest)
 		return 0, false
 	}
 
@@ -1759,251 +1057,6 @@ func loadGoalDistribution(totalMinutes int, goalID int, userID int) ([]GoalDistr
 	}
 
 	return distribution, rows.Err()
-}
-
-func writeJSON(w http.ResponseWriter, value any, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		http.Error(w, "failed to write response", http.StatusInternalServerError)
-	}
-}
-
-func addColumnIfMissing(database *sql.DB, table string, column string, definition string) error {
-	rows, err := database.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name string
-		var columnType string
-		var notNull int
-		var defaultValue sql.NullString
-		var primaryKey int
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return err
-		}
-		if name == column {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	_, err = database.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", table, definition))
-	return err
-}
-
-func currentUserFromRequest(w http.ResponseWriter, r *http.Request) (User, bool) {
-	token, ok := bearerToken(r)
-	if !ok {
-		http.Error(w, "authorization token is required", http.StatusUnauthorized)
-		return User{}, false
-	}
-
-	user, err := loadUserByToken(token)
-	if err == sql.ErrNoRows {
-		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
-		return User{}, false
-	}
-	if err != nil {
-		http.Error(w, "failed to read session", http.StatusInternalServerError)
-		return User{}, false
-	}
-
-	return user, true
-}
-
-func bearerToken(r *http.Request) (string, bool) {
-	header := r.Header.Get("Authorization")
-	if !strings.HasPrefix(header, "Bearer ") {
-		return "", false
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
-	return token, token != ""
-}
-
-func loadUserByEmail(email string) (User, error) {
-	row := db.QueryRow(`
-		SELECT id, email, name, password_hash, created_at
-		FROM users
-		WHERE email = ?
-	`, email)
-
-	return scanUser(row)
-}
-
-func loadUserByToken(token string) (User, error) {
-	row := db.QueryRow(`
-		SELECT users.id, users.email, users.name, users.password_hash, users.created_at
-		FROM auth_sessions
-		INNER JOIN users ON users.id = auth_sessions.user_id
-		WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
-	`, tokenHash(token), time.Now().Format(time.RFC3339))
-
-	user, err := scanUser(row)
-	if err != nil {
-		return User{}, err
-	}
-	user.PasswordHash = ""
-	return user, nil
-}
-
-type userScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanUser(scanner userScanner) (User, error) {
-	var user User
-	err := scanner.Scan(
-		&user.ID,
-		&user.Email,
-		&user.Name,
-		&user.PasswordHash,
-		&user.CreatedAt,
-	)
-	if err != nil {
-		return User{}, err
-	}
-
-	return user, nil
-}
-
-func createAuthSession(userID int) (string, error) {
-	token, err := randomToken(32)
-	if err != nil {
-		return "", err
-	}
-
-	now := time.Now()
-	_, err = db.Exec(`
-		INSERT INTO auth_sessions (token_hash, user_id, created_at, expires_at)
-		VALUES (?, ?, ?, ?)
-	`, tokenHash(token), userID, now.Format(time.RFC3339), now.Add(authTokenLifetime).Format(time.RFC3339))
-	if err != nil {
-		return "", err
-	}
-
-	return token, nil
-}
-
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
-
-func randomToken(size int) (string, error) {
-	bytes := make([]byte, size)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}
-
-func tokenHash(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
-}
-
-func tokenHashFromRequest(r *http.Request) string {
-	token, ok := bearerToken(r)
-	if !ok {
-		return ""
-	}
-	return tokenHash(token)
-}
-
-func isStrongPassword(password string) bool {
-	if len(password) < 8 {
-		return false
-	}
-
-	hasUpper := false
-	hasDigit := false
-	hasSpecial := false
-	for _, char := range password {
-		switch {
-		case char >= 'A' && char <= 'Z':
-			hasUpper = true
-		case char >= '0' && char <= '9':
-			hasDigit = true
-		case (char >= 'a' && char <= 'z') || char == ' ':
-			continue
-		default:
-			hasSpecial = true
-		}
-	}
-
-	return hasUpper && hasDigit && hasSpecial
-}
-
-func hashPassword(password string) (string, error) {
-	salt := make([]byte, passwordSaltBytes)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-
-	key := derivePasswordKey([]byte(password), salt, passwordRounds, passwordKeyBytes)
-	return fmt.Sprintf(
-		"%s$%d$%s$%s",
-		passwordHashName,
-		passwordRounds,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(key),
-	), nil
-}
-
-func verifyPassword(password string, storedHash string) bool {
-	parts := strings.Split(storedHash, "$")
-	if len(parts) != 4 || parts[0] != passwordHashName {
-		return false
-	}
-
-	rounds, err := strconv.Atoi(parts[1])
-	if err != nil || rounds <= 0 {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-	expected, err := base64.RawStdEncoding.DecodeString(parts[3])
-	if err != nil {
-		return false
-	}
-
-	key := derivePasswordKey([]byte(password), salt, rounds, len(expected))
-	return subtle.ConstantTimeCompare(key, expected) == 1
-}
-
-func derivePasswordKey(password []byte, salt []byte, rounds int, keyLength int) []byte {
-	hashLength := sha256.Size
-	blockCount := int(math.Ceil(float64(keyLength) / float64(hashLength)))
-	derived := make([]byte, 0, blockCount*hashLength)
-
-	for block := 1; block <= blockCount; block++ {
-		mac := hmac.New(sha256.New, password)
-		mac.Write(salt)
-		mac.Write([]byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)})
-		sum := mac.Sum(nil)
-		blockBytes := append([]byte(nil), sum...)
-
-		for round := 1; round < rounds; round++ {
-			mac = hmac.New(sha256.New, password)
-			mac.Write(sum)
-			sum = mac.Sum(nil)
-			for index := range blockBytes {
-				blockBytes[index] ^= sum[index]
-			}
-		}
-
-		derived = append(derived, blockBytes...)
-	}
-
-	return derived[:keyLength]
 }
 
 func weekdaysToString(weekdays []int) string {

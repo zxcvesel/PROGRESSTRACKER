@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+﻿import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import './App.css'
+import { AuthScreen } from './components/AuthScreen'
+import { SettingsDrawer } from './components/SettingsDrawer'
 
 type View = 'goals' | 'create' | 'stats'
 type SessionState = 'idle' | 'running' | 'paused'
@@ -96,7 +98,6 @@ type AuthUser = {
 
 type AuthResponse = {
   user: AuthUser
-  token: string
 }
 
 type AuthMode = 'login' | 'register'
@@ -150,7 +151,6 @@ const defaultStats: AppStats = {
 const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
 const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 const settingsStorageKey = 'progress-tracker-settings'
-const authTokenStorageKey = 'progress-tracker-auth-token'
 const defaultSettings: AppSettings = {
   theme: 'dark',
   accent: 'cyan',
@@ -472,7 +472,6 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const copy = translations[settings.language]
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [authToken, setAuthToken] = useState(() => window.localStorage.getItem(authTokenStorageKey) || '')
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [authForm, setAuthForm] = useState<AuthForm>({ email: '', name: '', password: '', confirmPassword: '' })
@@ -515,17 +514,71 @@ function App() {
   const [sessionEditTags, setSessionEditTags] = useState('')
 
   useEffect(() => {
-    loadInitialData()
-  }, [])
+    let isMounted = true
 
-  useEffect(() => {
-    if (authToken) {
-      window.localStorage.setItem(authTokenStorageKey, authToken)
-      return
+    async function bootApp() {
+      setIsLoading(true)
+
+      try {
+        const response = await fetch('/api/health')
+        const data = (await response.json()) as { status: string }
+        if (isMounted) {
+          setBackendStatus(data.status === 'ok' ? 'connected' : 'error')
+        }
+      } catch {
+        if (isMounted) {
+          setBackendStatus('error')
+        }
+      }
+
+      try {
+        const accountResponse = await fetch('/api/me', { credentials: 'same-origin' })
+        if (!accountResponse.ok) {
+          throw new Error('No active session')
+        }
+
+        const [user, goalsResponse, statsResponse] = await Promise.all([
+          accountResponse.json() as Promise<AuthUser>,
+          fetch('/api/goals', { credentials: 'same-origin' }),
+          fetch('/api/stats', { credentials: 'same-origin' }),
+        ])
+
+        if (!goalsResponse.ok || !statsResponse.ok) {
+          throw new Error('Failed to load account data')
+        }
+
+        const [loadedGoals, loadedStats] = await Promise.all([
+          goalsResponse.json() as Promise<GoalSummary[]>,
+          statsResponse.json() as Promise<AppStats>,
+        ])
+
+        if (isMounted) {
+          setCurrentUser(user)
+          setGoals(loadedGoals)
+          setStats(loadedStats)
+        }
+      } catch {
+        if (isMounted) {
+          setCurrentUser(null)
+          setGoals([])
+          setGoalDetail(null)
+          setSelectedGoalId(null)
+          setSelectedStatsGoalId(0)
+          setStats(defaultStats)
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      }
     }
 
-    window.localStorage.removeItem(authTokenStorageKey)
-  }, [authToken])
+    void bootApp()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   useEffect(() => {
     window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
@@ -575,55 +628,17 @@ function App() {
     return copy.screenGoals
   }, [copy, selectedGoalId, view])
 
-  async function loadInitialData() {
-    setIsLoading(true)
-    await checkBackend()
-    if (authToken) {
-      await loadAccount(authToken)
-    }
-    setIsLoading(false)
-  }
-
-  async function checkBackend() {
-    try {
-      const response = await fetch('/api/health')
-      const data = (await response.json()) as { status: string }
-      setBackendStatus(data.status === 'ok' ? 'connected' : 'error')
-    } catch {
-      setBackendStatus('error')
-    }
-  }
-
-  async function apiFetch(path: string, options: RequestInit = {}, token = authToken) {
+  async function apiFetch(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers)
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`)
-    }
 
-    const response = await fetch(path, { ...options, headers })
+    const response = await fetch(path, { ...options, credentials: 'same-origin', headers })
     if (response.status === 401) {
       handleAuthReset()
     }
     return response
   }
 
-  async function loadAccount(token = authToken) {
-    try {
-      const response = await apiFetch('/api/me', {}, token)
-      if (!response.ok) {
-        throw new Error('Failed to load account')
-      }
-
-      const user = (await response.json()) as AuthUser
-      setCurrentUser(user)
-      await Promise.all([loadGoals(token), loadStats(selectedStatsGoalId, token)])
-    } catch {
-      handleAuthReset()
-    }
-  }
-
   function handleAuthReset() {
-    setAuthToken('')
     setCurrentUser(null)
     setGoals([])
     setGoalDetail(null)
@@ -655,6 +670,7 @@ function App() {
     try {
       const response = await fetch(`/api/auth/${authMode === 'login' ? 'login' : 'register'}`, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -670,14 +686,13 @@ function App() {
       }
 
       const data = (await response.json()) as AuthResponse
-      setAuthToken(data.token)
       setCurrentUser(data.user)
       setAuthForm({ email: '', name: '', password: '', confirmPassword: '' })
       setSelectedGoalId(null)
       setSelectedStatsGoalId(0)
       setGoalDetail(null)
       setView('goals')
-      await Promise.all([loadGoals(data.token), loadStats(0, data.token)])
+      await Promise.all([loadGoals(), loadStats(0)])
     } catch {
       setAuthError(copy.authError)
     }
@@ -750,9 +765,9 @@ function App() {
     setAccountMessage(copy.passwordChanged)
   }
 
-  async function loadGoals(token = authToken) {
+  async function loadGoals() {
     try {
-      const response = await apiFetch('/api/goals', {}, token)
+      const response = await apiFetch('/api/goals')
       const data = (await response.json()) as GoalSummary[]
       setGoals(data)
     } catch {
@@ -760,10 +775,10 @@ function App() {
     }
   }
 
-  async function loadStats(goalId = selectedStatsGoalId, token = authToken) {
+  async function loadStats(goalId = selectedStatsGoalId) {
     try {
       const query = goalId ? `?goalId=${goalId}` : ''
-      const response = await apiFetch(`/api/stats${query}`, {}, token)
+      const response = await apiFetch(`/api/stats${query}`)
       const data = (await response.json()) as AppStats
       setStats(data)
     } catch {
@@ -1265,390 +1280,6 @@ function App() {
         />
       </section>
     </main>
-  )
-}
-
-function AuthScreen({
-  mode,
-  form,
-  error,
-  copy,
-  onModeChange,
-  onChange,
-  onSubmit,
-}: {
-  mode: AuthMode
-  form: AuthForm
-  error: string
-  copy: Copy
-  onModeChange: (mode: AuthMode) => void
-  onChange: (form: AuthForm) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-}) {
-  const isRegister = mode === 'register'
-  const [showPassword, setShowPassword] = useState(false)
-
-  return (
-    <section className="auth-screen">
-      <div className="flame-orb" aria-hidden="true">
-        <FlameIcon />
-      </div>
-      <div>
-        <h1>{isRegister ? copy.registerTitle : copy.signInTitle}</h1>
-        <p>{copy.authSubtitle}</p>
-      </div>
-
-      <form className="auth-form" onSubmit={onSubmit}>
-        <label>
-          {copy.email}
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            value={form.email}
-            onChange={(event) => onChange({ ...form, email: event.target.value })}
-          />
-        </label>
-
-        {isRegister && (
-          <label>
-            {copy.name}
-            <input
-              type="text"
-              autoComplete="name"
-              value={form.name}
-              onChange={(event) => onChange({ ...form, name: event.target.value })}
-            />
-          </label>
-        )}
-
-        <label>
-          {copy.password}
-          <span className="password-field">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              autoComplete={isRegister ? 'new-password' : 'current-password'}
-              minLength={8}
-              required
-              value={form.password}
-              onChange={(event) => onChange({ ...form, password: event.target.value })}
-            />
-            <button
-              type="button"
-              aria-label={showPassword ? copy.hidePassword : copy.showPassword}
-              onClick={() => setShowPassword((current) => !current)}
-            >
-              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-            </button>
-          </span>
-        </label>
-
-        {isRegister && (
-          <label>
-            {copy.confirmPassword}
-            <span className="password-field">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                minLength={8}
-                required
-                value={form.confirmPassword}
-                onChange={(event) => onChange({ ...form, confirmPassword: event.target.value })}
-              />
-              <button
-                type="button"
-                aria-label={showPassword ? copy.hidePassword : copy.showPassword}
-                onClick={() => setShowPassword((current) => !current)}
-              >
-                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-              </button>
-            </span>
-          </label>
-        )}
-
-        <span className="form-hint">{copy.passwordHint}</span>
-        {error && <p className="form-error">{error}</p>}
-
-        <button className="primary-button primary-button--large" type="submit">
-          {isRegister ? copy.createAccount : copy.signIn}
-        </button>
-      </form>
-
-      <button
-        className="ghost-button auth-switch"
-        type="button"
-        onClick={() => onModeChange(isRegister ? 'login' : 'register')}
-      >
-        {isRegister ? copy.haveAccount : copy.noAccount} {isRegister ? copy.signIn : copy.createAccount}
-      </button>
-    </section>
-  )
-}
-
-function SettingsDrawer({
-  isOpen,
-  settings,
-  currentUser,
-  accountName,
-  passwordForm,
-  accountMessage,
-  accountError,
-  copy,
-  onClose,
-  onChange,
-  onAccountNameChange,
-  onPasswordFormChange,
-  onProfileSubmit,
-  onPasswordSubmit,
-  onLogout,
-}: {
-  isOpen: boolean
-  settings: AppSettings
-  currentUser: AuthUser | null
-  accountName: string
-  passwordForm: PasswordForm
-  accountMessage: string
-  accountError: string
-  copy: Copy
-  onClose: () => void
-  onChange: (settings: Partial<AppSettings>) => void
-  onAccountNameChange: (name: string) => void
-  onPasswordFormChange: (form: PasswordForm) => void
-  onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onLogout: () => void
-}) {
-  if (!isOpen) {
-    return null
-  }
-
-  return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside
-        className="settings-drawer"
-        aria-label={copy.settings}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="settings-drawer__header">
-          <div>
-            <p>{copy.settings}</p>
-            <span>{copy.settingsSubtitle}</span>
-          </div>
-          <button className="icon-button icon-button--close" type="button" aria-label={copy.closeSettings} onClick={onClose}>
-            <span />
-            <span />
-          </button>
-        </div>
-
-        {currentUser && (
-          <SettingsGroup title={copy.account}>
-            <div className="about-list">
-              <p><span>{copy.signedInAs}</span><strong>{currentUser.email}</strong></p>
-            </div>
-
-            <form className="settings-form" onSubmit={onProfileSubmit}>
-              <label>
-                {copy.displayName}
-                <input
-                  type="text"
-                  value={accountName}
-                  onChange={(event) => onAccountNameChange(event.target.value)}
-                />
-              </label>
-              <button className="ghost-button" type="submit">
-                {copy.saveProfile}
-              </button>
-            </form>
-
-            <form className="settings-form" onSubmit={onPasswordSubmit}>
-              <label>
-                {copy.currentPassword}
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={passwordForm.currentPassword}
-                  onChange={(event) => onPasswordFormChange({ ...passwordForm, currentPassword: event.target.value })}
-                />
-              </label>
-              <label>
-                {copy.newPassword}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  value={passwordForm.newPassword}
-                  onChange={(event) => onPasswordFormChange({ ...passwordForm, newPassword: event.target.value })}
-                />
-              </label>
-              <label>
-                {copy.confirmPassword}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  value={passwordForm.confirmPassword}
-                  onChange={(event) => onPasswordFormChange({ ...passwordForm, confirmPassword: event.target.value })}
-                />
-              </label>
-              <p className="settings-note">{copy.passwordHint}</p>
-              <button className="ghost-button" type="submit">
-                {copy.changePassword}
-              </button>
-            </form>
-
-            {accountMessage && <p className="settings-success">{accountMessage}</p>}
-            {accountError && <p className="form-error">{accountError}</p>}
-
-            <button className="ghost-button" type="button" onClick={onLogout}>
-              {copy.logout}
-            </button>
-          </SettingsGroup>
-        )}
-
-        <SettingsGroup title={copy.appearance}>
-          <label>
-            {copy.theme}
-            <select
-              value={settings.theme}
-              onChange={(event) => onChange({ theme: event.target.value as ThemeMode })}
-            >
-              <option value="dark">{copy.themeDark}</option>
-              <option value="light">{copy.themeLight}</option>
-            </select>
-          </label>
-
-          <div className="settings-field">
-            <span>{copy.accentColor}</span>
-            <div className="swatch-grid" role="list" aria-label={copy.accentColor}>
-              {(['cyan', 'purple', 'orange', 'green'] as AccentColor[]).map((accent) => (
-                <button
-                  className={`swatch-button swatch-button--${accent} ${settings.accent === accent ? 'is-selected' : ''}`}
-                  type="button"
-                  key={accent}
-                  aria-label={accent}
-                  onClick={() => onChange({ accent })}
-                />
-              ))}
-            </div>
-          </div>
-
-          <label>
-            {copy.fontSize}
-            <select
-              value={settings.fontSize}
-              onChange={(event) => onChange({ fontSize: event.target.value as FontSize })}
-            >
-              <option value="compact">{copy.fontCompact}</option>
-              <option value="default">{copy.fontDefault}</option>
-              <option value="large">{copy.fontLarge}</option>
-            </select>
-          </label>
-
-          <ToggleRow
-            label={copy.reducedGlow}
-            checked={settings.reducedEffects}
-            onChange={(checked) => onChange({ reducedEffects: checked })}
-          />
-        </SettingsGroup>
-
-        <SettingsGroup title={copy.language}>
-          <label>
-            {copy.appLanguage}
-            <select
-              value={settings.language}
-              onChange={(event) => onChange({ language: event.target.value as AppLanguage })}
-            >
-              <option value="en">English</option>
-              <option value="ru">Русский</option>
-            </select>
-          </label>
-          <p className="settings-note">{copy.languageNote}</p>
-        </SettingsGroup>
-
-        <SettingsGroup title={copy.goals}>
-          <label>
-            {copy.defaultDuration}
-            <input
-              type="number"
-              min="1"
-              value={settings.defaultGoalDays}
-              onChange={(event) => onChange({ defaultGoalDays: event.target.value })}
-            />
-          </label>
-
-          <div className="form-row form-row--target">
-            <label>
-              {copy.defaultHours}
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={settings.defaultTargetHours}
-                onChange={(event) => onChange({ defaultTargetHours: event.target.value })}
-              />
-            </label>
-            <label>
-              {copy.minutes}
-              <input
-                type="number"
-                min="0"
-                max="59"
-                step="5"
-                value={settings.defaultTargetMinutes}
-                onChange={(event) => onChange({ defaultTargetMinutes: event.target.value })}
-              />
-            </label>
-          </div>
-
-          <ToggleRow
-            label={copy.confirmGoalDeletion}
-            checked={settings.confirmGoalDelete}
-            onChange={(checked) => onChange({ confirmGoalDelete: checked })}
-          />
-        </SettingsGroup>
-
-        <SettingsGroup title={copy.about}>
-          <div className="about-list">
-            <p><span>{copy.product}</span><strong>Progress Tracker</strong></p>
-            <p><span>{copy.focus}</span><strong>{copy.goalBasedLearning}</strong></p>
-            <p><span>{copy.stack}</span><strong>Go, SQLite, React, TypeScript</strong></p>
-          </div>
-        </SettingsGroup>
-      </aside>
-    </div>
-  )
-}
-
-function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="settings-group">
-      <h2>{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-function ToggleRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <label className="toggle-row">
-      <span>{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
   )
 }
 
@@ -2614,24 +2245,6 @@ function BackIcon() {
   )
 }
 
-function EyeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
-      <path d="M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
-    </svg>
-  )
-}
-
-function EyeOffIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M3 3l18 18" />
-      <path d="M10.6 10.6a2.5 2.5 0 0 0 2.8 2.8" />
-      <path d="M9.4 5.3A9.7 9.7 0 0 1 12 5c6 0 9.5 7 9.5 7a16 16 0 0 1-3 3.7" />
-      <path d="M6.4 6.8C3.9 8.5 2.5 12 2.5 12s3.5 7 9.5 7c1.5 0 2.8-.4 4-1" />
-    </svg>
-  )
-}
-
 export default App
+
+
