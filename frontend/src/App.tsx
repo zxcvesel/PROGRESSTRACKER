@@ -100,6 +100,10 @@ type AuthResponse = {
   user: AuthUser
 }
 
+type ApiErrorResponse = {
+  error?: string
+}
+
 type AuthMode = 'login' | 'register'
 
 type AuthForm = {
@@ -303,10 +307,12 @@ const translations = {
     stack: 'Stack',
     dailyTargetError: 'Daily target must be greater than 0',
     createGoalError: 'Could not create goal',
+    loadGoalError: 'Could not load goal',
     updateGoalError: 'Could not update goal',
     saveSessionError: 'Could not save session',
     updateSessionError: 'Could not update session',
     deleteGoalError: 'Could not delete goal',
+    deleteSessionError: 'Could not delete session',
     deleteSessionConfirm: 'Delete session?',
     todayCompleteAlert: 'Today target is already complete',
     deleteGoalConfirmSuffix: 'All saved sessions for this goal will also be deleted.',
@@ -452,10 +458,12 @@ const translations = {
     stack: 'Стек',
     dailyTargetError: 'Дневная норма должна быть больше 0',
     createGoalError: 'Не удалось создать цель',
+    loadGoalError: 'Не удалось загрузить цель',
     updateGoalError: 'Не удалось обновить цель',
     saveSessionError: 'Не удалось сохранить сессию',
     updateSessionError: 'Не удалось обновить сессию',
     deleteGoalError: 'Не удалось удалить цель',
+    deleteSessionError: 'Не удалось удалить сессию',
     deleteSessionConfirm: 'Удалить сессию?',
     todayCompleteAlert: 'Дневная норма уже выполнена',
     deleteGoalConfirmSuffix: 'Все сохраненные сессии этой цели также будут удалены.',
@@ -638,6 +646,19 @@ function App() {
     return response
   }
 
+  async function readApiError(response: Response, fallback: string) {
+    try {
+      const data = (await response.clone().json()) as ApiErrorResponse
+      if (typeof data.error === 'string' && data.error.trim() !== '') {
+        return `${fallback}: ${data.error}`
+      }
+    } catch {
+      // Some failed requests may not have a JSON body, for example network/proxy errors.
+    }
+
+    return fallback
+  }
+
   function handleAuthReset() {
     setCurrentUser(null)
     setGoals([])
@@ -682,7 +703,8 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Authentication failed')
+        setAuthError(await readApiError(response, copy.authError))
+        return
       }
 
       const data = (await response.json()) as AuthResponse
@@ -701,8 +723,8 @@ function App() {
   async function handleLogout() {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' })
-    } catch {
-      window.alert(copy.logoutError)
+    } catch (error) {
+      window.alert(error instanceof Error ? `${copy.logoutError}: ${error.message}` : copy.logoutError)
     } finally {
       handleAuthReset()
     }
@@ -722,7 +744,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setAccountError(copy.profileError)
+      setAccountError(await readApiError(response, copy.profileError))
       return
     }
 
@@ -757,7 +779,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setAccountError(copy.passwordChangeError)
+      setAccountError(await readApiError(response, copy.passwordChangeError))
       return
     }
 
@@ -768,6 +790,9 @@ function App() {
   async function loadGoals() {
     try {
       const response = await apiFetch('/api/goals')
+      if (!response.ok) {
+        throw new Error(await readApiError(response, copy.loadingGoals))
+      }
       const data = (await response.json()) as GoalSummary[]
       setGoals(data)
     } catch {
@@ -779,6 +804,9 @@ function App() {
     try {
       const query = goalId ? `?goalId=${goalId}` : ''
       const response = await apiFetch(`/api/stats${query}`)
+      if (!response.ok) {
+        throw new Error(await readApiError(response, copy.screenStats))
+      }
       const data = (await response.json()) as AppStats
       setStats(data)
     } catch {
@@ -796,6 +824,12 @@ function App() {
 
   async function loadGoalDetail(goalId: number) {
     const response = await apiFetch(`/api/goals/${goalId}`)
+    if (!response.ok) {
+      window.alert(await readApiError(response, copy.loadGoalError))
+      setGoalDetail(null)
+      setSelectedGoalId(null)
+      return
+    }
     const data = (await response.json()) as GoalDetail
     setGoalDetail(data)
   }
@@ -827,7 +861,8 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to create goal')
+        setFormError(await readApiError(response, copy.createGoalError))
+        return
       }
 
       const createdGoal = (await response.json()) as GoalSummary
@@ -892,7 +927,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setFormError(copy.saveSessionError)
+      setFormError(await readApiError(response, copy.saveSessionError))
       return
     }
 
@@ -940,7 +975,7 @@ function App() {
     })
 
     if (!response.ok) {
-      setFormError(copy.updateGoalError)
+      setFormError(await readApiError(response, copy.updateGoalError))
       return
     }
 
@@ -968,7 +1003,7 @@ function App() {
     })
 
     if (!response.ok) {
-      window.alert(copy.deleteGoalError)
+      window.alert(await readApiError(response, copy.deleteGoalError))
       return
     }
 
@@ -1006,7 +1041,7 @@ function App() {
     })
 
     if (!response.ok) {
-      window.alert(copy.updateSessionError)
+      window.alert(await readApiError(response, copy.updateSessionError))
       return
     }
 
@@ -1029,7 +1064,7 @@ function App() {
     })
 
     if (!response.ok) {
-      window.alert('Could not delete session')
+      window.alert(await readApiError(response, copy.deleteSessionError))
       return
     }
 
