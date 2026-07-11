@@ -109,6 +109,7 @@ Frontend работает через Vite development server и отправля
 - backend/data: local SQLite storage
 - frontend: React, TypeScript, and Vite app
 - frontend/src: main frontend source files, components, and styles
+- frontend/src/components: reusable UI blocks for authentication and settings
 - frontend/public: public icons and static assets
 
 ## Development Status
