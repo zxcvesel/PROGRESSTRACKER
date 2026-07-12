@@ -190,8 +190,21 @@ func main() {
 		log.Fatal(err)
 	}
 
-	mux := http.NewServeMux()
+	mux := newRouter()
 
+	port := os.Getenv("PROGRESS_TRACKER_PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("Backend is running on http://localhost:%s", port)
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func newRouter() http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("POST /auth/register", registerHandler)
 	mux.HandleFunc("POST /auth/login", loginHandler)
@@ -211,15 +224,7 @@ func main() {
 	mux.HandleFunc("DELETE /goals/{id}/sessions/{sessionId}", deleteSessionHandler)
 	mux.HandleFunc("GET /stats", statsHandler)
 
-	port := os.Getenv("PROGRESS_TRACKER_PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	log.Printf("Backend is running on http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatal(err)
-	}
+	return mux
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {

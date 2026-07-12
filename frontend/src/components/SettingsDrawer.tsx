@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 
 type ThemeMode = 'dark' | 'light'
 type AccentColor = 'cyan' | 'purple' | 'orange' | 'green'
@@ -15,6 +15,7 @@ type AppSettings = {
   defaultTargetHours: string
   defaultTargetMinutes: string
   confirmGoalDelete: boolean
+  notificationsEnabled: boolean
 }
 
 type AuthUser = {
@@ -61,10 +62,26 @@ type SettingsCopy = {
   minutes: string
   confirmGoalDeletion: string
   about: string
-  product: string
-  focus: string
-  goalBasedLearning: string
-  stack: string
+  productTagline: string
+  version: string
+  releaseChannel: string
+  beta: string
+  dataPrivacy: string
+  privateAccountData: string
+  copyright: string
+  manageAccount: string
+  notifications: string
+  notificationDescription: string
+  enableNotifications: string
+  disableNotifications: string
+  notificationsBlocked: string
+  notificationsUnsupported: string
+  notificationNote: string
+  legal: string
+  privacyPolicy: string
+  privacyText: string
+  termsOfUse: string
+  termsText: string
 }
 
 type SettingsDrawerProps = {
@@ -75,6 +92,8 @@ type SettingsDrawerProps = {
   passwordForm: PasswordForm
   accountMessage: string
   accountError: string
+  appVersion: string
+  notificationPermission: NotificationPermission | 'unsupported'
   copy: SettingsCopy
   onClose: () => void
   onChange: (settings: Partial<AppSettings>) => void
@@ -83,6 +102,7 @@ type SettingsDrawerProps = {
   onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void
   onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => void
   onLogout: () => void
+  onToggleNotifications: () => void
 }
 
 export function SettingsDrawer({
@@ -93,6 +113,8 @@ export function SettingsDrawer({
   passwordForm,
   accountMessage,
   accountError,
+  appVersion,
+  notificationPermission,
   copy,
   onClose,
   onChange,
@@ -101,13 +123,21 @@ export function SettingsDrawer({
   onProfileSubmit,
   onPasswordSubmit,
   onLogout,
+  onToggleNotifications,
 }: SettingsDrawerProps) {
+  const [accountOpen, setAccountOpen] = useState(false)
+
+  function closeDrawer() {
+    setAccountOpen(false)
+    onClose()
+  }
+
   if (!isOpen) {
     return null
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
+    <div className="drawer-backdrop" onClick={closeDrawer}>
       <aside
         className="settings-drawer"
         aria-label={copy.settings}
@@ -118,7 +148,7 @@ export function SettingsDrawer({
             <p>{copy.settings}</p>
             <span>{copy.settingsSubtitle}</span>
           </div>
-          <button className="icon-button icon-button--close" type="button" aria-label={copy.closeSettings} onClick={onClose}>
+          <button className="icon-button icon-button--close" type="button" aria-label={copy.closeSettings} onClick={closeDrawer}>
             <span />
             <span />
           </button>
@@ -126,69 +156,82 @@ export function SettingsDrawer({
 
         {currentUser && (
           <SettingsGroup title={copy.account}>
-            <div className="about-list">
-              <p><span>{copy.signedInAs}</span><strong>{currentUser.email}</strong></p>
-            </div>
-
-            <form className="settings-form" onSubmit={onProfileSubmit}>
-              <label>
-                {copy.displayName}
-                <input
-                  type="text"
-                  value={accountName}
-                  onChange={(event) => onAccountNameChange(event.target.value)}
-                />
-              </label>
-              <button className="ghost-button" type="submit">
-                {copy.saveProfile}
-              </button>
-            </form>
-
-            <form className="settings-form" onSubmit={onPasswordSubmit}>
-              <label>
-                {copy.currentPassword}
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={passwordForm.currentPassword}
-                  onChange={(event) => onPasswordFormChange({ ...passwordForm, currentPassword: event.target.value })}
-                />
-              </label>
-              <label>
-                {copy.newPassword}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  value={passwordForm.newPassword}
-                  onChange={(event) => onPasswordFormChange({ ...passwordForm, newPassword: event.target.value })}
-                />
-              </label>
-              <label>
-                {copy.confirmPassword}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  value={passwordForm.confirmPassword}
-                  onChange={(event) => onPasswordFormChange({ ...passwordForm, confirmPassword: event.target.value })}
-                />
-              </label>
-              <p className="settings-note">{copy.passwordHint}</p>
-              <button className="ghost-button" type="submit">
-                {copy.changePassword}
-              </button>
-            </form>
-
-            {accountMessage && <p className="settings-success">{accountMessage}</p>}
-            {accountError && <p className="form-error">{accountError}</p>}
-
-            <button className="ghost-button" type="button" onClick={onLogout}>
-              {copy.logout}
+            <button
+              className="account-summary"
+              type="button"
+              aria-expanded={accountOpen}
+              onClick={() => setAccountOpen((current) => !current)}
+            >
+              <span className="account-summary__avatar" aria-hidden="true">
+                {(currentUser.name || currentUser.email).slice(0, 1).toUpperCase()}
+              </span>
+              <span className="account-summary__identity">
+                <strong>{currentUser.name || copy.account}</strong>
+                <small>{currentUser.email}</small>
+              </span>
+              <i className={accountOpen ? 'is-open' : ''} aria-hidden="true" />
             </button>
+
+            {accountOpen && (
+              <div className="account-management">
+                <form className="settings-form" onSubmit={onProfileSubmit}>
+                  <label>
+                    {copy.displayName}
+                    <input
+                      type="text"
+                      value={accountName}
+                      onChange={(event) => onAccountNameChange(event.target.value)}
+                    />
+                  </label>
+                  <button className="ghost-button" type="submit">{copy.saveProfile}</button>
+                </form>
+
+                <details className="settings-details">
+                  <summary>{copy.changePassword}</summary>
+                  <form className="settings-form" onSubmit={onPasswordSubmit}>
+                    <label>
+                      {copy.currentPassword}
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        required
+                        value={passwordForm.currentPassword}
+                        onChange={(event) => onPasswordFormChange({ ...passwordForm, currentPassword: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      {copy.newPassword}
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={8}
+                        required
+                        value={passwordForm.newPassword}
+                        onChange={(event) => onPasswordFormChange({ ...passwordForm, newPassword: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      {copy.confirmPassword}
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={8}
+                        required
+                        value={passwordForm.confirmPassword}
+                        onChange={(event) => onPasswordFormChange({ ...passwordForm, confirmPassword: event.target.value })}
+                      />
+                    </label>
+                    <p className="settings-note">{copy.passwordHint}</p>
+                    <button className="ghost-button" type="submit">{copy.changePassword}</button>
+                  </form>
+                </details>
+
+                {accountMessage && <p className="settings-success">{accountMessage}</p>}
+                {accountError && <p className="form-error">{accountError}</p>}
+
+                <button className="ghost-button" type="button" onClick={onLogout}>{copy.logout}</button>
+              </div>
+            )}
           </SettingsGroup>
         )}
 
@@ -294,12 +337,50 @@ export function SettingsDrawer({
           />
         </SettingsGroup>
 
+        <SettingsGroup title={copy.notifications}>
+          <p className="settings-note settings-note--plain">{copy.notificationDescription}</p>
+          <button
+            className="ghost-button"
+            type="button"
+            disabled={notificationPermission === 'unsupported' || notificationPermission === 'denied'}
+            onClick={onToggleNotifications}
+          >
+            {notificationPermission === 'unsupported'
+              ? copy.notificationsUnsupported
+              : notificationPermission === 'denied'
+                ? copy.notificationsBlocked
+                : settings.notificationsEnabled
+                  ? copy.disableNotifications
+                  : copy.enableNotifications}
+          </button>
+          <p className="settings-note">{copy.notificationNote}</p>
+        </SettingsGroup>
+
+        <SettingsGroup title={copy.legal}>
+          <details className="settings-details legal-details">
+            <summary>{copy.privacyPolicy}</summary>
+            <p>{copy.privacyText}</p>
+          </details>
+          <details className="settings-details legal-details">
+            <summary>{copy.termsOfUse}</summary>
+            <p>{copy.termsText}</p>
+          </details>
+        </SettingsGroup>
+
         <SettingsGroup title={copy.about}>
-          <div className="about-list">
-            <p><span>{copy.product}</span><strong>Progress Tracker</strong></p>
-            <p><span>{copy.focus}</span><strong>{copy.goalBasedLearning}</strong></p>
-            <p><span>{copy.stack}</span><strong>Go, SQLite, React, TypeScript</strong></p>
+          <div className="about-product">
+            <span className="about-product__mark" aria-hidden="true">PT</span>
+            <div>
+              <strong>Progress Tracker</strong>
+              <p>{copy.productTagline}</p>
+            </div>
           </div>
+          <div className="about-list">
+            <p><span>{copy.version}</span><strong>{appVersion}</strong></p>
+            <p><span>{copy.releaseChannel}</span><strong>{copy.beta}</strong></p>
+            <p><span>{copy.dataPrivacy}</span><strong>{copy.privateAccountData}</strong></p>
+          </div>
+          <p className="about-copyright">{copy.copyright}</p>
         </SettingsGroup>
       </aside>
     </div>

@@ -2,6 +2,10 @@
 import './App.css'
 import { AuthScreen } from './components/AuthScreen'
 import { SettingsDrawer } from './components/SettingsDrawer'
+import { ActivityCalendar } from './components/ActivityCalendar'
+import { StatsScreen } from './components/StatsScreen'
+import { GoalForm } from './components/GoalForm'
+import { GoalsScreen } from './components/GoalsScreen'
 
 type View = 'goals' | 'create' | 'stats'
 type SessionState = 'idle' | 'running' | 'paused'
@@ -129,6 +133,17 @@ type AppSettings = {
   defaultTargetHours: string
   defaultTargetMinutes: string
   confirmGoalDelete: boolean
+  notificationsEnabled: boolean
+}
+
+type PersistedTimerSession = {
+  userId: number
+  goalId: number
+  state: Exclude<SessionState, 'idle'>
+  startedAt: string
+  elapsedSeconds: number
+  timerSpeed: number
+  savedAt: number
 }
 
 const defaultStats: AppStats = {
@@ -155,6 +170,8 @@ const defaultStats: AppStats = {
 const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
 const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 const settingsStorageKey = 'progress-tracker-settings'
+const timerStorageKey = 'progress-tracker-active-session'
+const reminderStorageKey = 'progress-tracker-last-reminder'
 const defaultSettings: AppSettings = {
   theme: 'dark',
   accent: 'cyan',
@@ -165,6 +182,7 @@ const defaultSettings: AppSettings = {
   defaultTargetHours: '2',
   defaultTargetMinutes: '0',
   confirmGoalDelete: true,
+  notificationsEnabled: false,
 }
 
 const translations = {
@@ -179,9 +197,9 @@ const translations = {
     navGoals: 'Goals',
     navCreateGoal: 'Create goal',
     navStats: 'Stats',
-    signInTitle: 'Welcome back',
+    signInTitle: 'Sign in',
     registerTitle: 'Create account',
-    authSubtitle: 'Sign in to keep your goals, sessions, streaks, and stats private.',
+    authSubtitle: 'Access your goals, sessions, streaks, and private progress history.',
     signIn: 'Sign in',
     createAccount: 'Create account',
     email: 'Email',
@@ -271,6 +289,12 @@ const translations = {
     weeklyCompletionRate: 'Weekly rate',
     previousWeek: 'Previous week',
     weekComparison: 'Week comparison',
+    targetReached: 'Daily target reached',
+    remainingToday: 'remaining today',
+    noDailyTarget: 'No active daily target',
+    moreThanPrevious: 'more than previous week',
+    lessThanPrevious: 'less than previous week',
+    sameAsPrevious: 'same as previous week',
     completedDay: 'Completed',
     partialDay: 'Partial',
     missedDay: 'Missed',
@@ -301,10 +325,33 @@ const translations = {
     defaultHours: 'Default hours',
     confirmGoalDeletion: 'Confirm goal deletion',
     about: 'About',
-    product: 'Product',
-    focus: 'Focus',
-    goalBasedLearning: 'Goal-based learning',
-    stack: 'Stack',
+    productTagline: 'Daily focus for long-term learning goals.',
+    version: 'Version',
+    releaseChannel: 'Release channel',
+    beta: 'Beta',
+    dataPrivacy: 'Your data',
+    privateAccountData: 'Private to your account',
+    copyright: '© 2026 Progress Tracker',
+    manageAccount: 'Manage account',
+    notifications: 'Notifications',
+    notificationDescription: 'Reminders while the app is open and session completion alerts.',
+    enableNotifications: 'Enable',
+    disableNotifications: 'Disable',
+    notificationsBlocked: 'Blocked in browser',
+    notificationsUnsupported: 'Not supported',
+    notificationNote: 'Background alerts on iPhone require the app to be installed to the Home Screen and Web Push support.',
+    targetReachedNotification: 'Daily target reached',
+    reminderNotification: 'Your daily target is still waiting',
+    reminderNotificationBody: 'Open Progress Tracker and continue today’s practice.',
+    activeSessionOtherGoal: 'Finish or discard the active session before opening another goal.',
+    legal: 'Legal',
+    privacyPolicy: 'Privacy Policy',
+    privacyText: 'Progress Tracker stores your account details, goals, sessions, notes, tags, and progress to provide the service. Your learning data is separated by account and is not sold or used for advertising. You can stop using the service at any time; account deletion and data export will be added before public release.',
+    termsOfUse: 'Terms of Use',
+    termsText: 'Progress Tracker is a personal productivity tool. You are responsible for the information you save and for keeping access to your account secure. The service is provided without guarantees of uninterrupted availability while it remains in beta.',
+    overview: 'Overview',
+    overallProgress: 'Overall progress',
+    totalPractice: 'Total practice',
     dailyTargetError: 'Daily target must be greater than 0',
     createGoalError: 'Could not create goal',
     loadGoalError: 'Could not load goal',
@@ -330,9 +377,9 @@ const translations = {
     navGoals: 'Цели',
     navCreateGoal: 'Создать цель',
     navStats: 'Статистика',
-    signInTitle: 'С возвращением',
+    signInTitle: 'Вход в аккаунт',
     registerTitle: 'Создание аккаунта',
-    authSubtitle: 'Войдите, чтобы цели, сессии, серии и статистика были привязаны к вашему аккаунту.',
+    authSubtitle: 'Получите доступ к своим целям, сессиям, сериям и личной истории прогресса.',
     signIn: 'Войти',
     createAccount: 'Создать аккаунт',
     email: 'Email',
@@ -422,6 +469,12 @@ const translations = {
     weeklyCompletionRate: 'Процент за неделю',
     previousWeek: 'Прошлая неделя',
     weekComparison: 'Сравнение недели',
+    targetReached: 'Дневная норма выполнена',
+    remainingToday: 'осталось сегодня',
+    noDailyTarget: 'Нет активной дневной нормы',
+    moreThanPrevious: 'больше прошлой недели',
+    lessThanPrevious: 'меньше прошлой недели',
+    sameAsPrevious: 'как на прошлой неделе',
     completedDay: 'Выполнено',
     partialDay: 'Частично',
     missedDay: 'Пропущено',
@@ -452,10 +505,33 @@ const translations = {
     defaultHours: 'Часы по умолчанию',
     confirmGoalDeletion: 'Подтверждать удаление цели',
     about: 'О приложении',
-    product: 'Продукт',
-    focus: 'Фокус',
-    goalBasedLearning: 'Целевое обучение',
-    stack: 'Стек',
+    productTagline: 'Ежедневный фокус для долгосрочных учебных целей.',
+    version: 'Версия',
+    releaseChannel: 'Канал выпуска',
+    beta: 'Бета',
+    dataPrivacy: 'Ваши данные',
+    privateAccountData: 'Доступны только вашему аккаунту',
+    copyright: '© 2026 Progress Tracker',
+    manageAccount: 'Управление аккаунтом',
+    notifications: 'Уведомления',
+    notificationDescription: 'Напоминания при открытом приложении и уведомления о завершении сессии.',
+    enableNotifications: 'Включить',
+    disableNotifications: 'Выключить',
+    notificationsBlocked: 'Заблокированы в браузере',
+    notificationsUnsupported: 'Не поддерживаются',
+    notificationNote: 'Для фоновых уведомлений на iPhone приложение потребуется установить на экран «Домой» и подключить Web Push.',
+    targetReachedNotification: 'Дневная норма выполнена',
+    reminderNotification: 'Дневная норма ещё не выполнена',
+    reminderNotificationBody: 'Откройте Progress Tracker и продолжите сегодняшнее занятие.',
+    activeSessionOtherGoal: 'Завершите или отмените активную сессию перед открытием другой цели.',
+    legal: 'Правовая информация',
+    privacyPolicy: 'Политика конфиденциальности',
+    privacyText: 'Progress Tracker хранит данные аккаунта, цели, сессии, заметки, теги и прогресс для работы сервиса. Учебные данные разделены по аккаунтам, не продаются и не используются для рекламы. Вы можете прекратить использование сервиса в любое время; удаление аккаунта и экспорт данных будут добавлены до публичного выпуска.',
+    termsOfUse: 'Условия использования',
+    termsText: 'Progress Tracker — персональный инструмент продуктивности. Вы отвечаете за сохранённую информацию и безопасность доступа к аккаунту. Пока приложение находится в бета-версии, сервис предоставляется без гарантии непрерывной доступности.',
+    overview: 'Обзор',
+    overallProgress: 'Общий прогресс',
+    totalPractice: 'Всего практики',
     dailyTargetError: 'Дневная норма должна быть больше 0',
     createGoalError: 'Не удалось создать цель',
     loadGoalError: 'Не удалось загрузить цель',
@@ -503,6 +579,7 @@ function App() {
   const [goalForm, setGoalForm] = useState<GoalForm>(() => createDefaultGoalForm(settings))
 
   const [sessionState, setSessionState] = useState<SessionState>('idle')
+  const [sessionGoalId, setSessionGoalId] = useState<number | null>(null)
   const [sessionStartedAt, setSessionStartedAt] = useState('')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [timerSpeed, setTimerSpeed] = useState(1)
@@ -520,6 +597,9 @@ function App() {
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null)
   const [sessionEditNotes, setSessionEditNotes] = useState('')
   const [sessionEditTags, setSessionEditTags] = useState('')
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => (
+    'Notification' in window ? Notification.permission : 'unsupported'
+  ))
 
   useEffect(() => {
     let isMounted = true
@@ -560,10 +640,32 @@ function App() {
           statsResponse.json() as Promise<AppStats>,
         ])
 
+        let restoredTimer: PersistedTimerSession | null = null
+        let restoredDetail: GoalDetail | null = null
+        const savedTimer = loadPersistedTimer(user.id)
+        if (savedTimer && loadedGoals.some((goal) => goal.id === savedTimer.goalId)) {
+          const detailResponse = await fetch(`/api/goals/${savedTimer.goalId}`, { credentials: 'same-origin' })
+          if (detailResponse.ok) {
+            restoredDetail = (await detailResponse.json()) as GoalDetail
+            restoredTimer = savedTimer
+          }
+        }
+
         if (isMounted) {
           setCurrentUser(user)
           setGoals(loadedGoals)
           setStats(loadedStats)
+          if (restoredTimer && restoredDetail) {
+            const restored = restoreElapsedTimer(restoredTimer, restoredDetail)
+            setSelectedGoalId(restoredTimer.goalId)
+            setGoalDetail(restoredDetail)
+            setSessionGoalId(restoredTimer.goalId)
+            setSessionStartedAt(restoredTimer.startedAt)
+            setElapsedSeconds(restored.elapsedSeconds)
+            setTimerSpeed(restoredTimer.timerSpeed)
+            setSessionState(restored.state)
+            setFinishModalOpen(restored.reachedTarget)
+          }
         }
       } catch {
         if (isMounted) {
@@ -597,6 +699,55 @@ function App() {
   }, [currentUser])
 
   useEffect(() => {
+    if (!currentUser || !sessionGoalId || sessionState === 'idle') {
+      return
+    }
+
+    const persisted: PersistedTimerSession = {
+      userId: currentUser.id,
+      goalId: sessionGoalId,
+      state: sessionState,
+      startedAt: sessionStartedAt,
+      elapsedSeconds,
+      timerSpeed,
+      savedAt: Date.now(),
+    }
+    window.localStorage.setItem(timerStorageKey, JSON.stringify(persisted))
+  }, [currentUser, elapsedSeconds, sessionGoalId, sessionStartedAt, sessionState, timerSpeed])
+
+  useEffect(() => {
+    if (!currentUser || !settings.notificationsEnabled || notificationPermission !== 'granted') {
+      return
+    }
+
+    function remindAboutDailyGoals() {
+      const now = new Date()
+      if (now.getHours() < 20) {
+        return
+      }
+
+      const reminderId = `${currentUser?.id}:${localDateString(now)}`
+      if (window.localStorage.getItem(reminderStorageKey) === reminderId) {
+        return
+      }
+
+      const hasIncompleteGoal = goals.some((goal) => (
+        goal.status === 'active' && goal.todayMinutes < goal.dailyTargetMinutes
+      ))
+      if (!hasIncompleteGoal) {
+        return
+      }
+
+      showBrowserNotification(copy.reminderNotification, copy.reminderNotificationBody)
+      window.localStorage.setItem(reminderStorageKey, reminderId)
+    }
+
+    remindAboutDailyGoals()
+    const reminderTimer = window.setInterval(remindAboutDailyGoals, 60_000)
+    return () => window.clearInterval(reminderTimer)
+  }, [copy, currentUser, goals, notificationPermission, settings.notificationsEnabled])
+
+  useEffect(() => {
     if (sessionState !== 'running' || !goalDetail) {
       return
     }
@@ -610,6 +761,9 @@ function App() {
           window.clearInterval(timer)
           setSessionState('paused')
           setFinishModalOpen(true)
+          if (settings.notificationsEnabled && notificationPermission === 'granted') {
+            showBrowserNotification(copy.targetReachedNotification, goalDetail.title)
+          }
           return targetSeconds
         }
 
@@ -618,9 +772,13 @@ function App() {
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [goalDetail, sessionState, timerSpeed])
+  }, [copy.targetReachedNotification, goalDetail, notificationPermission, sessionState, settings.notificationsEnabled, timerSpeed])
 
   const screenTitle = useMemo(() => {
+    if (!currentUser) {
+      return ''
+    }
+
     if (view === 'create') {
       return copy.screenNewGoal
     }
@@ -634,7 +792,7 @@ function App() {
     }
 
     return copy.screenGoals
-  }, [copy, selectedGoalId, view])
+  }, [copy, currentUser, selectedGoalId, view])
 
   async function apiFetch(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers)
@@ -815,6 +973,11 @@ function App() {
   }
 
   async function openGoal(goalId: number) {
+    if (sessionState !== 'idle' && sessionGoalId && sessionGoalId !== goalId) {
+      window.alert(copy.activeSessionOtherGoal)
+      goalId = sessionGoalId
+    }
+
     setSelectedGoalId(goalId)
     setView('goals')
     setIsEditingGoal(false)
@@ -887,6 +1050,7 @@ function App() {
     }
 
     setSessionStartedAt(toLocalISOString(new Date()))
+    setSessionGoalId(goalDetail.id)
     setElapsedSeconds(0)
     setSessionState('running')
   }
@@ -1083,11 +1247,46 @@ function App() {
     setSessionState('idle')
     setElapsedSeconds(0)
     setSessionStartedAt('')
+    setSessionGoalId(null)
     setFinishModalOpen(false)
     setSessionNotes('')
     setSessionTags('')
     setFormError('')
     setTimerSpeed(1)
+    window.localStorage.removeItem(timerStorageKey)
+  }
+
+  function leaveGoalView() {
+    if (sessionState === 'running') {
+      setSessionState('paused')
+    }
+    setSelectedGoalId(null)
+    setGoalDetail(null)
+    setIsEditingGoal(false)
+    setEditingSessionId(null)
+  }
+
+  async function toggleNotifications() {
+    if (settings.notificationsEnabled) {
+      setSettings((current) => ({ ...current, notificationsEnabled: false }))
+      return
+    }
+
+    if (!('Notification' in window)) {
+      setNotificationPermission('unsupported')
+      return
+    }
+
+    try {
+      const permission = await Notification.requestPermission()
+      setNotificationPermission(permission)
+      if (permission === 'granted') {
+        setSettings((current) => ({ ...current, notificationsEnabled: true }))
+        showBrowserNotification('Progress Tracker', copy.notificationDescription)
+      }
+    } catch {
+      setNotificationPermission('unsupported')
+    }
   }
 
   return (
@@ -1110,11 +1309,7 @@ function App() {
                 aria-label={selectedGoalId ? copy.backToGoals : copy.openSettings}
                 onClick={() => {
                   if (selectedGoalId) {
-                    setSelectedGoalId(null)
-                    setGoalDetail(null)
-                    setIsEditingGoal(false)
-                    setEditingSessionId(null)
-                    resetSession()
+                    leaveGoalView()
                     return
                   }
 
@@ -1208,7 +1403,8 @@ function App() {
               )}
 
               {view === 'create' && (
-                <CreateGoalScreen
+                <GoalForm
+                  mode="create"
                   form={goalForm}
                   formError={formError}
                   copy={copy}
@@ -1240,10 +1436,7 @@ function App() {
             type="button"
             onClick={() => {
               setView('goals')
-              setSelectedGoalId(null)
-              setGoalDetail(null)
-              setIsEditingGoal(false)
-              setEditingSessionId(null)
+              leaveGoalView()
             }}
             aria-label={copy.navGoals}
           >
@@ -1255,10 +1448,7 @@ function App() {
             onClick={() => {
               setGoalForm(createDefaultGoalForm(settings))
               setView('create')
-              setSelectedGoalId(null)
-              setGoalDetail(null)
-              setIsEditingGoal(false)
-              setEditingSessionId(null)
+              leaveGoalView()
             }}
             aria-label={copy.navCreateGoal}
           >
@@ -1269,10 +1459,7 @@ function App() {
             type="button"
             onClick={() => {
               setView('stats')
-              setSelectedGoalId(null)
-              setGoalDetail(null)
-              setIsEditingGoal(false)
-              setEditingSessionId(null)
+              leaveGoalView()
               void loadStats(selectedStatsGoalId)
             }}
             aria-label={copy.navStats}
@@ -1304,6 +1491,8 @@ function App() {
           passwordForm={passwordForm}
           accountMessage={accountMessage}
           accountError={accountError}
+          appVersion={__APP_VERSION__}
+          notificationPermission={notificationPermission}
           copy={copy}
           onClose={() => setSettingsOpen(false)}
           onChange={(nextSettings) => setSettings((current) => ({ ...current, ...nextSettings }))}
@@ -1312,262 +1501,10 @@ function App() {
           onProfileSubmit={updateProfile}
           onPasswordSubmit={changePassword}
           onLogout={handleLogout}
+          onToggleNotifications={toggleNotifications}
         />
       </section>
     </main>
-  )
-}
-
-function GoalsScreen({
-  goals,
-  isLoading,
-  copy,
-  onCreate,
-  onOpenGoal,
-}: {
-  goals: GoalSummary[]
-  isLoading: boolean
-  copy: Copy
-  onCreate: () => void
-  onOpenGoal: (goalId: number) => void
-}) {
-  if (isLoading) {
-    return <p className="empty-message">{copy.loadingGoals}</p>
-  }
-
-  if (goals.length === 0) {
-    return (
-      <section className="empty-state">
-        <div className="flame-orb" aria-hidden="true">
-          <FlameIcon />
-        </div>
-        <h1>{copy.emptyGoalTitle}</h1>
-        <p>{copy.emptyGoalText}</p>
-        <button className="primary-button" type="button" onClick={onCreate}>
-          {copy.createGoal}
-        </button>
-      </section>
-    )
-  }
-
-  return (
-    <section className="goals-list">
-      <div className="section-heading">
-        <h2>{copy.myGoals}</h2>
-        <span>{goals.length} {copy.activeGoals}</span>
-      </div>
-
-      {goals.map((goal, index) => (
-        <button className="goal-card" type="button" key={goal.id} onClick={() => onOpenGoal(goal.id)}>
-          <div className="goal-card__top">
-              <span
-                className="entry-marker"
-                style={{ backgroundColor: markerColors[index % markerColors.length] }}
-              />
-            <div>
-              <h3>{goal.title}</h3>
-              <p>{goal.description || copy.goalFallbackDescription}</p>
-            </div>
-            <span className={`status-pill status-pill--${goal.status}`}>{statusLabel(goal.status, copy)}</span>
-          </div>
-
-          <div className="goal-card__metrics">
-            <span>{copy.streak}: {goal.currentStreak}</span>
-            <span>
-              {copy.today}: {formatMinutes(goal.todayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}
-            </span>
-          </div>
-
-          <ProgressBar value={goal.todayProgressPct} />
-
-          <div className="goal-card__footer">
-            <span>{copy.day} {goal.currentStreak} {copy.of} {goal.totalDays}</span>
-            <span>{goal.totalProgressPct}% {copy.total}</span>
-          </div>
-        </button>
-      ))}
-    </section>
-  )
-}
-
-function CreateGoalScreen({
-  form,
-  formError,
-  copy,
-  onChange,
-  onSubmit,
-}: {
-  form: GoalForm
-  formError: string
-  copy: Copy
-  onChange: (form: GoalForm) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-}) {
-  return (
-    <form className="entry-form" onSubmit={onSubmit}>
-      <div className="section-heading">
-        <h2>{copy.createGoalTitle}</h2>
-        <span>{copy.longTermFocus}</span>
-      </div>
-
-      <label>
-        {copy.title}
-        <input
-          value={form.title}
-          onChange={(event) => onChange({ ...form, title: event.target.value })}
-          placeholder="Learn Go"
-          required
-        />
-      </label>
-
-      <label>
-        {copy.description}
-        <textarea
-          value={form.description}
-          onChange={(event) => onChange({ ...form, description: event.target.value })}
-          placeholder="Study the language, build APIs, and reinforce with practice"
-          rows={3}
-        />
-      </label>
-
-      <div className="form-row form-row--single">
-        <label>
-          {copy.days}
-          <input
-            type="number"
-            min="1"
-            value={form.totalDays}
-            onChange={(event) => onChange({ ...form, totalDays: event.target.value })}
-            required
-          />
-        </label>
-      </div>
-
-      <div className="form-row form-row--target">
-        <label>
-          {copy.dailyTargetHours}
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={form.dailyTargetHours}
-            onChange={(event) => onChange({ ...form, dailyTargetHours: event.target.value })}
-            required
-          />
-        </label>
-
-        <label>
-          {copy.minutes}
-          <input
-            type="number"
-            min="0"
-            max="59"
-            step="5"
-            value={form.dailyTargetMinutes}
-            onChange={(event) => onChange({ ...form, dailyTargetMinutes: event.target.value })}
-            required
-          />
-        </label>
-      </div>
-
-      <p className="form-hint">{copy.createHint}</p>
-
-      {formError && <p className="form-error">{formError}</p>}
-
-      <button className="primary-button" type="submit">
-        {copy.createGoal}
-      </button>
-    </form>
-  )
-}
-
-function GoalEditForm({
-  form,
-  formError,
-  copy,
-  onChange,
-  onSubmit,
-  onCancel,
-}: {
-  form: GoalForm
-  formError: string
-  copy: Copy
-  onChange: (form: GoalForm) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onCancel: () => void
-}) {
-  return (
-    <form className="entry-form" onSubmit={onSubmit}>
-      <div className="section-heading">
-        <h2>{copy.editGoal}</h2>
-        <span>{copy.adjustTarget}</span>
-      </div>
-
-      <label>
-        {copy.title}
-        <input
-          value={form.title}
-          onChange={(event) => onChange({ ...form, title: event.target.value })}
-          required
-        />
-      </label>
-
-      <label>
-        {copy.description}
-        <textarea
-          value={form.description}
-          onChange={(event) => onChange({ ...form, description: event.target.value })}
-          rows={3}
-        />
-      </label>
-
-      <div className="form-row form-row--single">
-        <label>
-          {copy.days}
-          <input
-            type="number"
-            min="1"
-            value={form.totalDays}
-            onChange={(event) => onChange({ ...form, totalDays: event.target.value })}
-            required
-          />
-        </label>
-      </div>
-
-      <div className="form-row form-row--target">
-        <label>
-          {copy.dailyTargetHours}
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={form.dailyTargetHours}
-            onChange={(event) => onChange({ ...form, dailyTargetHours: event.target.value })}
-            required
-          />
-        </label>
-
-        <label>
-          {copy.minutes}
-          <input
-            type="number"
-            min="0"
-            max="59"
-            step="5"
-            value={form.dailyTargetMinutes}
-            onChange={(event) => onChange({ ...form, dailyTargetMinutes: event.target.value })}
-            required
-          />
-        </label>
-      </div>
-
-      {formError && <p className="form-error">{formError}</p>}
-
-      <div className="sheet-actions">
-        <button className="ghost-button" type="button" onClick={onCancel}>{copy.cancel}</button>
-        <button className="primary-button" type="submit">{copy.saveChanges}</button>
-      </div>
-    </form>
   )
 }
 
@@ -1634,54 +1571,72 @@ function GoalDetailsScreen({
   const liveTodayMinutes = goal.todayMinutes + liveSessionMinutes
   const liveTodayProgressPct = percent(liveTodayMinutes, goal.dailyTargetMinutes)
   const liveRemainingMinutes = Math.max(goal.dailyTargetMinutes - liveTodayMinutes, 0)
+  const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview')
   const ringStyle = {
     '--ring-progress': `${goal.totalProgressPct}%`,
   } as CSSProperties
 
   return (
     <>
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <span className="flame-orb" aria-hidden="true">
-            <FlameIcon />
-          </span>
+      <section className="goal-overview">
+        <div className="goal-overview__header">
           <div>
-            <strong>{goal.currentStreak}</strong>
-            <p>{copy.dayStreak}</p>
+            <div className="goal-overview__title">
+              <h1>{goal.title}</h1>
+              <span className={`status-pill status-pill--${goal.status}`}>
+                {statusLabel(goal.status, copy)}
+              </span>
+            </div>
+            {goal.description && <p>{goal.description}</p>}
+          </div>
+          <button
+            className="icon-button goal-overview__edit"
+            type="button"
+            aria-label={copy.editGoal}
+            title={copy.editGoal}
+            onClick={onEditGoalStart}
+          >
+            <EditIcon />
+          </button>
+        </div>
+
+        <div className="goal-overview__summary">
+          <div className="goal-overview__ring">
+            <div
+              className="hero-ring"
+              style={ringStyle}
+              aria-label={`${copy.goalCompleted} ${goal.totalProgressPct}%`}
+            >
+              <span>{goal.totalProgressPct}%</span>
+            </div>
+            <span>{copy.overallProgress}</span>
+          </div>
+          <div className="goal-overview__metrics">
+            <article>
+              <span>{copy.streak}</span>
+              <strong>{goal.currentStreak} {copy.days.toLowerCase()}</strong>
+            </article>
+            <article>
+              <span>{copy.totalPractice}</span>
+              <strong>{formatMinutes(goal.totalPracticeMinutes)}</strong>
+            </article>
           </div>
         </div>
-        <div
-          className="hero-ring"
-          style={ringStyle}
-          aria-label={`${copy.goalCompleted} ${goal.totalProgressPct}%`}
-        >
-          <span>{goal.totalProgressPct}%</span>
-        </div>
-      </section>
 
-      <section className="goal-panel">
-        <div className="section-heading">
-          <h2>{goal.title}</h2>
-          <span>{statusLabel(goal.status, copy)}</span>
-        </div>
-        <p>{formatMinutes(liveTodayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}</p>
-        <small>{formatMinutes(liveRemainingMinutes)} {copy.leftToday}</small>
-        <div className="goal-progress-label">
-          <span>{copy.todayTarget}</span>
+        <div className="goal-overview__today">
+          <div>
+            <span>{copy.todayTarget}</span>
+            <strong>{formatMinutes(liveTodayMinutes)} / {formatMinutes(goal.dailyTargetMinutes)}</strong>
+          </div>
           <span>{liveTodayProgressPct}%</span>
         </div>
         <ProgressBar value={liveTodayProgressPct} />
-        <div className="goal-meta">
-          <span>{copy.day} {goal.currentStreak} {copy.of} {goal.totalDays}</span>
-          <span>{formatMinutes(goal.totalPracticeMinutes)} {copy.practiced}</span>
-        </div>
-        <button className="ghost-button compact-button" type="button" onClick={onEditGoalStart}>
-          {copy.editGoal}
-        </button>
+        <small>{formatMinutes(liveRemainingMinutes)} {copy.leftToday}</small>
       </section>
 
       {isEditingGoal && (
-        <GoalEditForm
+        <GoalForm
+          mode="edit"
           form={editGoalForm}
           formError={formError}
           copy={copy}
@@ -1691,13 +1646,27 @@ function GoalDetailsScreen({
         />
       )}
 
-      <ActivityCalendar
-        days={goal.calendar}
-        copy={copy}
-        language={language}
-      />
+      {!isEditingGoal && (
+        <nav className="goal-tabs" aria-label={copy.screenGoal}>
+          <button
+            className={activeTab === 'overview' ? 'is-active' : ''}
+            type="button"
+            onClick={() => setActiveTab('overview')}
+          >
+            {copy.overview}
+          </button>
+          <button
+            className={activeTab === 'history' ? 'is-active' : ''}
+            type="button"
+            onClick={() => setActiveTab('history')}
+          >
+            {copy.history}
+          </button>
+        </nav>
+      )}
 
-      <section className="timer-panel">
+      {!isEditingGoal && activeTab === 'overview' && <>
+        <section className="timer-panel">
         <div className="dev-speed-panel" aria-label="Development timer speed">
           <span>{copy.devTimer}</span>
           <div>
@@ -1734,28 +1703,37 @@ function GoalDetailsScreen({
             </div>
           </>
         )}
-      </section>
+        </section>
 
-      <HistorySection
-        sessions={goal.recentSessions}
-        copy={copy}
-        language={language}
-        editingSessionId={editingSessionId}
-        editNotes={sessionEditNotes}
-        editTags={sessionEditTags}
-        onEditStart={onEditSessionStart}
-        onEditCancel={onEditSessionCancel}
-        onEditSave={onEditSessionSave}
-        onDelete={onDeleteSession}
-        onNotesChange={onSessionEditNotesChange}
-        onTagsChange={onSessionEditTagsChange}
-      />
+        <ActivityCalendar
+          days={goal.calendar}
+          copy={copy}
+          language={language}
+        />
+      </>}
 
-      <section className="danger-panel">
-        <button className="danger-button" type="button" onClick={onDelete}>
-          {copy.deleteGoal}
-        </button>
-      </section>
+      {!isEditingGoal && activeTab === 'history' && <>
+        <HistorySection
+          sessions={goal.recentSessions}
+          copy={copy}
+          language={language}
+          editingSessionId={editingSessionId}
+          editNotes={sessionEditNotes}
+          editTags={sessionEditTags}
+          onEditStart={onEditSessionStart}
+          onEditCancel={onEditSessionCancel}
+          onEditSave={onEditSessionSave}
+          onDelete={onDeleteSession}
+          onNotesChange={onSessionEditNotesChange}
+          onTagsChange={onSessionEditTagsChange}
+        />
+
+        <section className="danger-panel">
+          <button className="danger-button" type="button" onClick={onDelete}>
+            {copy.deleteGoal}
+          </button>
+        </section>
+      </>}
     </>
   )
 }
@@ -1819,185 +1797,6 @@ function FinishSessionModal({
         </div>
       </section>
     </div>
-  )
-}
-
-function StatsScreen({
-  stats,
-  goals,
-  selectedGoalId,
-  copy,
-  language,
-  onGoalChange,
-}: {
-  stats: AppStats
-  goals: GoalSummary[]
-  selectedGoalId: number
-  copy: Copy
-  language: AppLanguage
-  onGoalChange: (goalId: number) => void
-}) {
-  const todayPercent = percent(stats.todayMinutes, stats.dailyTargetMinutes)
-
-  return (
-    <>
-      <section className="chart-panel">
-        <label className="stats-goal-filter">
-          {copy.selectedGoal}
-          <select
-            value={selectedGoalId}
-            onChange={(event) => onGoalChange(Number(event.target.value))}
-          >
-            <option value={0}>{copy.allGoals}</option>
-            {goals.map((goal) => (
-              <option value={goal.id} key={goal.id}>{goal.title}</option>
-            ))}
-          </select>
-        </label>
-      </section>
-
-      <section className="stats-grid stats-grid--large" aria-label={copy.screenStats}>
-        <article className="stat-card">
-          <p>{copy.sessions}</p>
-          <strong>{stats.totalSessions}</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.practice}</p>
-          <strong>{formatMinutes(stats.totalPracticeMinutes)}</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.currentStreak}</p>
-          <strong>{stats.currentStreak}</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.longestStreak}</p>
-          <strong>{stats.longestStreak}</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.completedDays}</p>
-          <strong>{stats.completedDays}</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.missedDays}</p>
-          <strong>{stats.missedDays}</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.completionRate}</p>
-          <strong>{stats.completionRate}%</strong>
-        </article>
-        <article className="stat-card">
-          <p>{copy.weeklyCompletionRate}</p>
-          <strong>{stats.weeklyCompletionRate}%</strong>
-        </article>
-      </section>
-
-      <section className="chart-panel">
-        <div className="section-heading">
-          <h2>{copy.today}</h2>
-          <span>{todayPercent}% {copy.targetPercent}</span>
-        </div>
-        <p className="chart-caption">
-          {formatMinutes(stats.todayMinutes)} / {formatMinutes(stats.dailyTargetMinutes)}
-        </p>
-        <ProgressBar value={todayPercent} />
-      </section>
-
-      <section className="chart-panel">
-        <div className="section-heading">
-          <h2>{copy.week}</h2>
-          <span>{stats.weekComparisonPct >= 0 ? '+' : ''}{stats.weekComparisonPct}%</span>
-        </div>
-        <p className="chart-caption">
-          {copy.previousWeek}: {formatMinutes(stats.previousWeekMinutes)} · {copy.weekComparison}
-        </p>
-        <div className="weekly-chart">
-          {stats.weekly.map((day) => {
-            const value = percent(day.minutes, day.targetMinutes)
-            return (
-              <div className="week-day" key={day.date}>
-                <span className="week-bar">
-                  <span
-                    className={day.isCompleted ? 'is-complete' : ''}
-                    style={{ height: `${Math.max(value, day.minutes > 0 ? 12 : 0)}%` }}
-                  />
-                </span>
-                <small>{formatWeekday(day.date, language)}</small>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      <ActivityCalendar
-        days={stats.calendar}
-        copy={copy}
-        language={language}
-      />
-
-      <section className="chart-panel">
-        <div className="section-heading">
-          <h2>{copy.month}</h2>
-          <span>{formatMinutes(stats.monthlyTotalMinutes)}</span>
-        </div>
-        {stats.goalDistribution.length === 0 && (
-          <p className="empty-message">{copy.emptyDistribution}</p>
-        )}
-        {stats.goalDistribution.map((item, index) => (
-          <article className="category-row" key={item.goalId}>
-            <span
-              className="entry-marker"
-              style={{ backgroundColor: markerColors[index % markerColors.length] }}
-            />
-            <div>
-              <div className="category-line">
-                <p>{item.title}</p>
-                <strong>{formatMinutes(item.minutes)}</strong>
-              </div>
-              <span className="bar-track">
-                <span style={{ width: `${item.percent}%` }} />
-              </span>
-            </div>
-          </article>
-        ))}
-      </section>
-    </>
-  )
-}
-
-function ActivityCalendar({
-  days,
-  copy,
-  language,
-}: {
-  days: WeeklyStat[]
-  copy: Copy
-  language: AppLanguage
-}) {
-  return (
-    <section className="chart-panel">
-      <div className="section-heading">
-        <h2>{copy.calendar}</h2>
-        <span>{days.length} {copy.days}</span>
-      </div>
-      <div className="activity-calendar" aria-label={copy.calendar}>
-        {days.map((day) => {
-          const state = calendarDayState(day)
-          return (
-            <span
-              className={`calendar-day calendar-day--${state}`}
-              key={day.date}
-              title={`${formatFullDate(day.date, language)} · ${formatMinutes(day.minutes)} / ${formatMinutes(day.targetMinutes)}`}
-              aria-label={`${formatFullDate(day.date, language)} ${formatMinutes(day.minutes)} / ${formatMinutes(day.targetMinutes)}`}
-            />
-          )
-        })}
-      </div>
-      <div className="calendar-legend">
-        <span><i className="calendar-day calendar-day--completed" />{copy.completedDay}</span>
-        <span><i className="calendar-day calendar-day--partial" />{copy.partialDay}</span>
-        <span><i className="calendar-day calendar-day--missed" />{copy.missedDay}</span>
-      </div>
-    </section>
   )
 }
 
@@ -2193,35 +1992,6 @@ function formatSessionDate(value: string, language: AppLanguage) {
   }).format(new Date(value))
 }
 
-function formatWeekday(value: string, language: AppLanguage) {
-  return new Intl.DateTimeFormat(localeFor(language), {
-    weekday: 'short',
-  }).format(new Date(value))
-}
-
-function formatFullDate(value: string, language: AppLanguage) {
-  return new Intl.DateTimeFormat(localeFor(language), {
-    month: 'long',
-    day: 'numeric',
-  }).format(new Date(value))
-}
-
-function calendarDayState(day: WeeklyStat) {
-  if (day.targetMinutes <= 0) {
-    return 'empty'
-  }
-
-  if (day.isCompleted) {
-    return 'completed'
-  }
-
-  if (day.minutes > 0) {
-    return 'partial'
-  }
-
-  return 'missed'
-}
-
 function toLocalISOString(date: Date) {
   const timezoneOffset = -date.getTimezoneOffset()
   const sign = timezoneOffset >= 0 ? '+' : '-'
@@ -2238,6 +2008,67 @@ function percent(value: number, total: number) {
   }
 
   return Math.min(Math.round((value / total) * 100), 100)
+}
+
+function loadPersistedTimer(userId: number): PersistedTimerSession | null {
+  try {
+    const rawValue = window.localStorage.getItem(timerStorageKey)
+    if (!rawValue) {
+      return null
+    }
+
+    const value = JSON.parse(rawValue) as Partial<PersistedTimerSession>
+    const isValid = value.userId === userId
+      && typeof value.goalId === 'number'
+      && (value.state === 'running' || value.state === 'paused')
+      && typeof value.startedAt === 'string'
+      && typeof value.elapsedSeconds === 'number'
+      && typeof value.timerSpeed === 'number'
+      && typeof value.savedAt === 'number'
+
+    if (!isValid) {
+      window.localStorage.removeItem(timerStorageKey)
+      return null
+    }
+
+    return value as PersistedTimerSession
+  } catch {
+    window.localStorage.removeItem(timerStorageKey)
+    return null
+  }
+}
+
+function restoreElapsedTimer(timer: PersistedTimerSession, goal: GoalDetail) {
+  const elapsedWhileClosed = timer.state === 'running'
+    ? Math.max((Date.now() - timer.savedAt) / 1000, 0) * timer.timerSpeed
+    : 0
+  const targetSeconds = Math.max((goal.dailyTargetMinutes - goal.todayMinutes) * 60, 0)
+  const restoredSeconds = timer.elapsedSeconds + elapsedWhileClosed
+  const reachedTarget = targetSeconds > 0 && restoredSeconds >= targetSeconds
+
+  return {
+    elapsedSeconds: reachedTarget ? targetSeconds : restoredSeconds,
+    state: reachedTarget ? 'paused' as const : timer.state,
+    reachedTarget,
+  }
+}
+
+function localDateString(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function showBrowserNotification(title: string, body: string) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') {
+    return
+  }
+  try {
+    new Notification(title, { body, icon: '/favicon.svg' })
+  } catch {
+    // Mobile browsers may require notifications to be shown by a service worker.
+  }
 }
 
 function isStrongPassword(password: string) {
@@ -2268,6 +2099,15 @@ function ChartIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M5 19V9M12 19V5M19 19v-7" />
+    </svg>
+  )
+}
+
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 20h4l11-11-4-4L4 16v4Z" />
+      <path d="m13.5 6.5 4 4" />
     </svg>
   )
 }
