@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -15,19 +14,22 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request AuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
 		return
 	}
 
-	email := normalizeEmail(request.Email)
+	email, validEmail := normalizeAndValidateEmail(request.Email)
 	name := strings.TrimSpace(request.Name)
-	if email == "" || !strings.Contains(email, "@") {
+	if !validEmail {
 		writeError(w, "valid email is required", http.StatusBadRequest)
 		return
 	}
-	if !isStrongPassword(request.Password) {
-		writeError(w, "password must include uppercase letters, numbers, and special characters", http.StatusBadRequest)
+	if !validTextLength(name, maxNameLength) {
+		writeError(w, "name must not exceed 100 characters", http.StatusBadRequest)
+		return
+	}
+	if !validPasswordLength(request.Password) || !isStrongPassword(request.Password) {
+		writeError(w, "password must be 8-128 characters and include uppercase letters, numbers, and special characters", http.StatusBadRequest)
 		return
 	}
 
@@ -76,12 +78,17 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request AuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
 		return
 	}
 
-	user, err := loadUserByEmail(normalizeEmail(request.Email))
+	email, validEmail := normalizeAndValidateEmail(request.Email)
+	if !validEmail || len(request.Password) > maxPasswordLength {
+		writeError(w, "invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := loadUserByEmail(email)
 	if err == sql.ErrNoRows {
 		writeError(w, "invalid email or password", http.StatusUnauthorized)
 		return
@@ -138,12 +145,15 @@ func updateMeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request UpdateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
 		return
 	}
 
 	name := strings.TrimSpace(request.Name)
+	if !validTextLength(name, maxNameLength) {
+		writeError(w, "name must not exceed 100 characters", http.StatusBadRequest)
+		return
+	}
 	_, err := db.Exec(`UPDATE users SET name = ? WHERE id = ?`, name, user.ID)
 	if err != nil {
 		writeError(w, "failed to update profile", http.StatusInternalServerError)
@@ -161,8 +171,11 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request ChangePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if len(request.CurrentPassword) > maxPasswordLength {
+		writeError(w, "current password is incorrect", http.StatusBadRequest)
 		return
 	}
 
@@ -175,8 +188,8 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "current password is incorrect", http.StatusBadRequest)
 		return
 	}
-	if !isStrongPassword(request.NewPassword) {
-		writeError(w, "password must include uppercase letters, numbers, and special characters", http.StatusBadRequest)
+	if !validPasswordLength(request.NewPassword) || !isStrongPassword(request.NewPassword) {
+		writeError(w, "password must be 8-128 characters and include uppercase letters, numbers, and special characters", http.StatusBadRequest)
 		return
 	}
 
@@ -280,6 +293,9 @@ func scanUser(scanner userScanner) (User, error) {
 }
 
 func createAuthSession(userID int) (string, error) {
+	if err := cleanupExpiredAuthSessions(db); err != nil {
+		return "", err
+	}
 	token, err := randomToken(32)
 	if err != nil {
 		return "", err
@@ -303,6 +319,7 @@ func setAuthCookie(w http.ResponseWriter, token string) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secureCookiesEnabled(),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(authTokenLifetime),
 		MaxAge:   int(authTokenLifetime.Seconds()),
@@ -315,6 +332,7 @@ func clearAuthCookie(w http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secureCookiesEnabled(),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,

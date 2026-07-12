@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"log"
 	"math"
 	"net/http"
@@ -190,15 +189,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	mux := newRouter()
-
-	port := os.Getenv("PROGRESS_TRACKER_PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	log.Printf("Backend is running on http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := runServer(newRouter()); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -224,7 +215,7 @@ func newRouter() http.Handler {
 	mux.HandleFunc("DELETE /goals/{id}/sessions/{sessionId}", deleteSessionHandler)
 	mux.HandleFunc("GET /stats", statsHandler)
 
-	return mux
+	return securityMiddleware(mux)
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +236,10 @@ func openDatabase() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := configureDatabase(database, dbPath); err != nil {
+		database.Close()
+		return nil, err
+	}
 
 	queries := []string{
 		`
@@ -262,7 +257,7 @@ func openDatabase() (*sql.DB, error) {
 			user_id INTEGER NOT NULL,
 			created_at TEXT NOT NULL,
 			expires_at TEXT NOT NULL,
-			FOREIGN KEY(user_id) REFERENCES users(id)
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 		);
 		`,
 		`
@@ -270,7 +265,7 @@ func openDatabase() (*sql.DB, error) {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			date TEXT NOT NULL,
 			category TEXT NOT NULL,
-			minutes INTEGER NOT NULL,
+			minutes INTEGER NOT NULL CHECK(minutes BETWEEN 1 AND 1440),
 			note TEXT NOT NULL DEFAULT ''
 		);
 		`,
@@ -279,12 +274,12 @@ func openDatabase() (*sql.DB, error) {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			title TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
-			total_days INTEGER NOT NULL,
-			daily_target_minutes INTEGER NOT NULL,
+			total_days INTEGER NOT NULL CHECK(total_days BETWEEN 1 AND 3650),
+			daily_target_minutes INTEGER NOT NULL CHECK(daily_target_minutes BETWEEN 1 AND 1440),
 			active_weekdays TEXT NOT NULL,
 			start_date TEXT NOT NULL,
 			created_at TEXT NOT NULL,
-			status TEXT NOT NULL DEFAULT 'active'
+			status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'completed'))
 		);
 		`,
 		`
@@ -293,22 +288,22 @@ func openDatabase() (*sql.DB, error) {
 			goal_id INTEGER NOT NULL,
 			started_at TEXT NOT NULL,
 			ended_at TEXT NOT NULL,
-			duration_minutes INTEGER NOT NULL,
+			duration_minutes INTEGER NOT NULL CHECK(duration_minutes BETWEEN 1 AND 1440),
 			notes TEXT NOT NULL DEFAULT '',
 			tags TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
-			FOREIGN KEY(goal_id) REFERENCES goals(id)
+			FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE CASCADE
 		);
 		`,
 		`
 		CREATE TABLE IF NOT EXISTS daily_progress (
 			goal_id INTEGER NOT NULL,
 			date TEXT NOT NULL,
-			total_minutes INTEGER NOT NULL DEFAULT 0,
-			target_minutes INTEGER NOT NULL,
-			is_completed INTEGER NOT NULL DEFAULT 0,
+			total_minutes INTEGER NOT NULL DEFAULT 0 CHECK(total_minutes >= 0),
+			target_minutes INTEGER NOT NULL CHECK(target_minutes BETWEEN 1 AND 1440),
+			is_completed INTEGER NOT NULL DEFAULT 0 CHECK(is_completed IN (0, 1)),
 			PRIMARY KEY(goal_id, date),
-			FOREIGN KEY(goal_id) REFERENCES goals(id)
+			FOREIGN KEY(goal_id) REFERENCES goals(id) ON DELETE CASCADE
 		);
 		`,
 	}
@@ -325,6 +320,14 @@ func openDatabase() (*sql.DB, error) {
 		return nil, err
 	}
 	if err := addColumnIfMissing(database, "entries", "user_id", "user_id INTEGER NOT NULL DEFAULT 1"); err != nil {
+		database.Close()
+		return nil, err
+	}
+	if err := runDatabaseMigrations(database); err != nil {
+		database.Close()
+		return nil, err
+	}
+	if err := cleanupExpiredAuthSessions(database); err != nil {
 		database.Close()
 		return nil, err
 	}
@@ -376,13 +379,11 @@ func createEntryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var entry Entry
-	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &entry) {
 		return
 	}
-
-	if entry.Date == "" || entry.Category == "" || entry.Minutes <= 0 {
-		writeError(w, "date, category, and positive minutes are required", http.StatusBadRequest)
+	if message := validateEntryInput(&entry); message != "" {
+		writeError(w, message, http.StatusBadRequest)
 		return
 	}
 

@@ -21,11 +21,38 @@ func TestAPIRouterHealthAndMethodHandling(t *testing.T) {
 	if contentType := health.Header().Get("Content-Type"); contentType != "application/json" {
 		t.Fatalf("health content type = %q, want application/json", contentType)
 	}
+	for header, expected := range map[string]string{
+		"Cache-Control":          "no-store",
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+	} {
+		if actual := health.Header().Get(header); actual != expected {
+			t.Fatalf("%s = %q, want %q", header, actual, expected)
+		}
+	}
 
 	wrongMethod := apiRequest(t, router, http.MethodPost, "/health", "", nil)
 	if wrongMethod.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("wrong method status = %d, want %d", wrongMethod.Code, http.StatusMethodNotAllowed)
 	}
+}
+
+func TestAPIMutatingCookieRequestRequiresAllowedOrigin(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	cookie := registerAPIUser(t, router, "origin@example.com")
+
+	request := httptest.NewRequest(http.MethodPost, "/goals", strings.NewReader(`{"title":"Blocked","totalDays":10,"dailyTargetMinutes":10}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://attacker.example")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("malicious origin status = %d, body = %s", response.Code, response.Body.String())
+	}
+	assertAPIError(t, response, "request origin is not allowed")
 }
 
 func TestAPIProtectedRoutesRequireAuthentication(t *testing.T) {
@@ -313,6 +340,31 @@ func TestAPIRejectsInvalidResourceInput(t *testing.T) {
 	}
 }
 
+func TestAPIStrictJSONAndBodyLimit(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	cookie := registerAPIUser(t, router, "json@example.com")
+
+	tests := []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{"unknown field", `{"title":"Goal","totalDays":10,"dailyTargetMinutes":10,"admin":true}`, http.StatusBadRequest},
+		{"multiple objects", `{"title":"Goal","totalDays":10,"dailyTargetMinutes":10}{}`, http.StatusBadRequest},
+		{"oversized body", `{"title":"Goal","description":"` + strings.Repeat("a", maxJSONBodyBytes) + `","totalDays":10,"dailyTargetMinutes":10}`, http.StatusRequestEntityTooLarge},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := apiRequest(t, router, http.MethodPost, "/goals", test.body, cookie)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d, body = %s", response.Code, test.status, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestRateLimiterRejectsRequestsOverLimit(t *testing.T) {
 	limiter := newRateLimiter(2, time.Minute)
 	if !limiter.Allow("login:client") || !limiter.Allow("login:client") {
@@ -326,6 +378,58 @@ func TestRateLimiterRejectsRequestsOverLimit(t *testing.T) {
 	}
 }
 
+func TestRateLimitKeyTrustsForwardedAddressOnlyWhenConfigured(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	request.RemoteAddr = "192.0.2.10:54321"
+	request.Header.Set("X-Forwarded-For", "198.51.100.8, 192.0.2.20")
+
+	if key := rateLimitKey(request, "login"); key != "login:192.0.2.10" {
+		t.Fatalf("untrusted proxy key = %q", key)
+	}
+	t.Setenv("PROGRESS_TRACKER_TRUST_PROXY", "true")
+	if key := rateLimitKey(request, "login"); key != "login:198.51.100.8" {
+		t.Fatalf("trusted proxy key = %q", key)
+	}
+}
+
+func TestDatabaseMigrationsAndConstraints(t *testing.T) {
+	setupTestDatabase(t)
+
+	var migrations int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrations); err != nil {
+		t.Fatal(err)
+	}
+	if migrations != len(databaseMigrations) {
+		t.Fatalf("migration count = %d, want %d", migrations, len(databaseMigrations))
+	}
+	if err := runDatabaseMigrations(db); err != nil {
+		t.Fatalf("repeat migrations: %v", err)
+	}
+	var migrationsAfterRepeat int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsAfterRepeat); err != nil {
+		t.Fatal(err)
+	}
+	if migrationsAfterRepeat != migrations {
+		t.Fatalf("migration count after repeat = %d, want %d", migrationsAfterRepeat, migrations)
+	}
+
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+
+	_, err := db.Exec(`
+		INSERT INTO goals (title, description, total_days, daily_target_minutes, active_weekdays, start_date, created_at, status, user_id)
+		VALUES ('Invalid', '', 0, 10, '1,2,3,4,5,6,7', ?, ?, 'active', 1)
+	`, todayString(), time.Now().Format(time.RFC3339))
+	if err == nil {
+		t.Fatal("database accepted invalid goal duration")
+	}
+}
+
 func apiRequest(t *testing.T, router http.Handler, method string, path string, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -335,6 +439,9 @@ func apiRequest(t *testing.T, router http.Handler, method string, path string, b
 	}
 	if cookie != nil {
 		request.AddCookie(cookie)
+		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+			request.Header.Set("Origin", "http://127.0.0.1:5173")
+		}
 	}
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -390,8 +497,8 @@ func createSessionForGoal(t *testing.T, router http.Handler, cookie *http.Cookie
 }
 
 func sessionJSON(minutes int) string {
-	start := time.Now().In(time.Local).Truncate(time.Minute)
-	end := start.Add(time.Duration(minutes) * time.Minute)
+	end := time.Now().In(time.Local).Add(-time.Minute).Truncate(time.Minute)
+	start := end.Add(-time.Duration(minutes) * time.Minute)
 	return fmt.Sprintf(`{"startedAt":%q,"endedAt":%q,"durationMinutes":%d,"notes":"Practice","tags":["API"]}`,
 		start.Format(time.RFC3339), end.Format(time.RFC3339), minutes)
 }

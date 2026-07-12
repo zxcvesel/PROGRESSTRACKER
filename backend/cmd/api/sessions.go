@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -13,13 +13,11 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request CreateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
 		return
 	}
-
-	if request.StartedAt == "" || request.EndedAt == "" || request.DurationMinutes <= 0 {
-		writeError(w, "startedAt, endedAt, and positive durationMinutes are required", http.StatusBadRequest)
+	if message := validateSessionInput(&request); message != "" {
+		writeError(w, message, http.StatusBadRequest)
 		return
 	}
 
@@ -32,6 +30,10 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if hasExistingSession {
+		if existingSession.DurationMinutes+request.DurationMinutes > maxDailyMinutes {
+			writeError(w, "daily session duration must not exceed 1440 minutes", http.StatusBadRequest)
+			return
+		}
 		updatedNotes := mergeSessionNotes(existingSession.Notes, request.Notes)
 		updatedTags := mergeTags(existingSession.Tags, request.Tags)
 		_, err := db.Exec(`
@@ -108,8 +110,13 @@ func updateSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request UpdateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	request.Notes = strings.TrimSpace(request.Notes)
+	request.Tags = cleanTags(request.Tags)
+	if message := validateSessionContent(request.Notes, request.Tags); message != "" {
+		writeError(w, message, http.StatusBadRequest)
 		return
 	}
 

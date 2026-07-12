@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -24,17 +26,25 @@ func writeError(w http.ResponseWriter, message string, status int) {
 }
 
 type rateLimiter struct {
-	mu       sync.Mutex
-	limit    int
-	window   time.Duration
-	attempts map[string][]time.Time
+	mu          sync.Mutex
+	limit       int
+	window      time.Duration
+	maxKeys     int
+	lastCleanup time.Time
+	attempts    map[string]rateLimitBucket
+}
+
+type rateLimitBucket struct {
+	times    []time.Time
+	lastSeen time.Time
 }
 
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{
 		limit:    limit,
 		window:   window,
-		attempts: map[string][]time.Time{},
+		maxKeys:  10000,
+		attempts: map[string]rateLimitBucket{},
 	}
 }
 
@@ -44,27 +54,50 @@ func (limiter *rateLimiter) Allow(key string) bool {
 
 	now := time.Now()
 	cutoff := now.Add(-limiter.window)
-	current := limiter.attempts[key]
-	filtered := current[:0]
-	for _, attempt := range current {
+	if limiter.lastCleanup.IsZero() || now.Sub(limiter.lastCleanup) >= limiter.window {
+		limiter.cleanup(cutoff)
+		limiter.lastCleanup = now
+	}
+
+	bucket := limiter.attempts[key]
+	filtered := bucket.times[:0]
+	for _, attempt := range bucket.times {
 		if attempt.After(cutoff) {
 			filtered = append(filtered, attempt)
 		}
 	}
 
 	if len(filtered) >= limiter.limit {
-		limiter.attempts[key] = filtered
+		limiter.attempts[key] = rateLimitBucket{times: filtered, lastSeen: now}
 		return false
 	}
+	if len(limiter.attempts) >= limiter.maxKeys {
+		if _, exists := limiter.attempts[key]; !exists {
+			return false
+		}
+	}
 
-	limiter.attempts[key] = append(filtered, now)
+	limiter.attempts[key] = rateLimitBucket{times: append(filtered, now), lastSeen: now}
 	return true
 }
 
+func (limiter *rateLimiter) cleanup(cutoff time.Time) {
+	for key, bucket := range limiter.attempts {
+		if bucket.lastSeen.Before(cutoff) {
+			delete(limiter.attempts, key)
+		}
+	}
+}
+
 func rateLimitKey(r *http.Request, action string) string {
-	remote := r.RemoteAddr
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
-		remote = strings.Split(forwarded, ",")[0]
+	remote := strings.TrimSpace(r.RemoteAddr)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_TRUST_PROXY")), "true") {
+		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+			remote = strings.TrimSpace(strings.Split(forwarded, ",")[0])
+		}
+	}
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		remote = host
 	}
 	if remote == "" {
 		remote = "unknown"

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -38,22 +37,29 @@ func createGoalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request CreateGoalRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
 		return
 	}
 
-	if request.Title == "" || request.TotalDays <= 0 || request.DailyTargetMinutes <= 0 {
-		writeError(w, "title, totalDays, and dailyTargetMinutes are required", http.StatusBadRequest)
+	if message := validateGoalInput(&request.Title, &request.Description, request.TotalDays, request.DailyTargetMinutes); message != "" {
+		writeError(w, message, http.StatusBadRequest)
 		return
 	}
 
 	if len(request.ActiveWeekdays) == 0 {
 		request.ActiveWeekdays = []int{1, 2, 3, 4, 5, 6, 7}
 	}
+	if !validateWeekdays(request.ActiveWeekdays) {
+		writeError(w, "activeWeekdays must contain unique values from 1 to 7", http.StatusBadRequest)
+		return
+	}
 
 	if request.StartDate == "" {
 		request.StartDate = todayString()
+	}
+	if _, err := time.Parse(time.DateOnly, request.StartDate); err != nil {
+		writeError(w, "startDate must use YYYY-MM-DD", http.StatusBadRequest)
+		return
 	}
 
 	createdAt := time.Now().Format(time.RFC3339)
@@ -143,13 +149,12 @@ func updateGoalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request UpdateGoalRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(w, "invalid JSON", http.StatusBadRequest)
+	if !decodeJSON(w, r, &request) {
 		return
 	}
 
-	if request.Title == "" || request.TotalDays <= 0 || request.DailyTargetMinutes <= 0 {
-		writeError(w, "title, totalDays, and dailyTargetMinutes are required", http.StatusBadRequest)
+	if message := validateGoalInput(&request.Title, &request.Description, request.TotalDays, request.DailyTargetMinutes); message != "" {
+		writeError(w, message, http.StatusBadRequest)
 		return
 	}
 
