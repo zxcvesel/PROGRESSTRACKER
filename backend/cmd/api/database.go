@@ -61,6 +61,77 @@ var databaseMigrations = []databaseMigration{
 			BEGIN SELECT RAISE(ABORT, 'invalid entry duration'); END;
 		`,
 	},
+	{
+		version: 2,
+		name:    "one session per goal and calendar day",
+		SQL: `
+			ALTER TABLE sessions ADD COLUMN session_date TEXT NOT NULL DEFAULT '';
+			UPDATE sessions
+			SET session_date = substr(ended_at, 1, 10)
+			WHERE session_date = '';
+
+			UPDATE sessions AS keeper
+			SET duration_minutes = MIN(1440, (
+					SELECT COALESCE(SUM(duplicate.duration_minutes), keeper.duration_minutes)
+					FROM sessions AS duplicate
+					WHERE duplicate.goal_id = keeper.goal_id
+						AND duplicate.session_date = keeper.session_date
+				)),
+				started_at = (
+					SELECT MIN(duplicate.started_at)
+					FROM sessions AS duplicate
+					WHERE duplicate.goal_id = keeper.goal_id
+						AND duplicate.session_date = keeper.session_date
+				),
+				ended_at = (
+					SELECT MAX(duplicate.ended_at)
+					FROM sessions AS duplicate
+					WHERE duplicate.goal_id = keeper.goal_id
+						AND duplicate.session_date = keeper.session_date
+				),
+				notes = COALESCE((
+					SELECT GROUP_CONCAT(NULLIF(duplicate.notes, ''), char(10) || char(10))
+					FROM sessions AS duplicate
+					WHERE duplicate.goal_id = keeper.goal_id
+						AND duplicate.session_date = keeper.session_date
+				), ''),
+				tags = COALESCE((
+					SELECT GROUP_CONCAT(NULLIF(duplicate.tags, ''), ',')
+					FROM sessions AS duplicate
+					WHERE duplicate.goal_id = keeper.goal_id
+						AND duplicate.session_date = keeper.session_date
+				), '')
+			WHERE keeper.id IN (
+				SELECT MIN(id)
+				FROM sessions
+				GROUP BY goal_id, session_date
+			);
+
+			DELETE FROM sessions
+			WHERE id NOT IN (
+				SELECT MIN(id)
+				FROM sessions
+				GROUP BY goal_id, session_date
+			);
+
+			CREATE UNIQUE INDEX idx_sessions_goal_session_date
+			ON sessions(goal_id, session_date);
+
+			CREATE TRIGGER validate_session_date_insert
+			BEFORE INSERT ON sessions
+			WHEN length(NEW.session_date) != 10
+				OR date(NEW.session_date) IS NULL
+				OR NEW.session_date != substr(NEW.ended_at, 1, 10)
+			BEGIN SELECT RAISE(ABORT, 'invalid session date'); END;
+
+			CREATE TRIGGER validate_session_date_update
+			BEFORE UPDATE ON sessions
+			WHEN length(NEW.session_date) != 10
+				OR date(NEW.session_date) IS NULL
+				OR NEW.session_date != substr(NEW.ended_at, 1, 10)
+			BEGIN SELECT RAISE(ABORT, 'invalid session date'); END;
+		`,
+	},
 }
 
 func configureDatabase(database *sql.DB, path string) error {

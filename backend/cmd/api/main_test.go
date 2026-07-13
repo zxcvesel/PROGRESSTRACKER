@@ -442,9 +442,13 @@ func insertSessionForDate(t *testing.T, goalID int, date time.Time, durationMinu
 	endedAt := startedAt.Add(time.Duration(durationMinutes) * time.Minute)
 
 	_, err := db.Exec(`
-		INSERT INTO sessions (goal_id, started_at, ended_at, duration_minutes, notes, tags, created_at)
-		VALUES (?, ?, ?, ?, '', '', ?)
-	`, goalID, startedAt.Format(time.RFC3339), endedAt.Format(time.RFC3339), durationMinutes, time.Now().Format(time.RFC3339))
+		INSERT INTO sessions (goal_id, started_at, ended_at, duration_minutes, notes, tags, created_at, session_date)
+		VALUES (?, ?, ?, ?, '', '', ?, ?)
+		ON CONFLICT(goal_id, session_date) DO UPDATE SET
+			ended_at = excluded.ended_at,
+			duration_minutes = sessions.duration_minutes + excluded.duration_minutes
+	`, goalID, startedAt.Format(time.RFC3339), endedAt.Format(time.RFC3339), durationMinutes,
+		time.Now().Format(time.RFC3339), endedAt.Format(time.DateOnly))
 	if err != nil {
 		t.Fatal(err)
 	}

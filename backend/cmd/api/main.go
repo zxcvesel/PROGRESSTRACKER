@@ -31,152 +31,6 @@ const (
 
 var authRateLimiter = newRateLimiter(12, 10*time.Minute)
 
-type User struct {
-	ID           int    `json:"id"`
-	Email        string `json:"email"`
-	Name         string `json:"name"`
-	PasswordHash string `json:"-"`
-	CreatedAt    string `json:"createdAt"`
-}
-
-type AuthRequest struct {
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Password string `json:"password"`
-}
-
-type UpdateProfileRequest struct {
-	Name string `json:"name"`
-}
-
-type ChangePasswordRequest struct {
-	CurrentPassword string `json:"currentPassword"`
-	NewPassword     string `json:"newPassword"`
-}
-
-type AuthResponse struct {
-	User User `json:"user"`
-}
-
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-
-type Entry struct {
-	ID       int    `json:"id"`
-	Date     string `json:"date"`
-	Category string `json:"category"`
-	Minutes  int    `json:"minutes"`
-	Note     string `json:"note"`
-}
-
-type Goal struct {
-	ID                 int    `json:"id"`
-	UserID             int    `json:"-"`
-	Title              string `json:"title"`
-	Description        string `json:"description"`
-	TotalDays          int    `json:"totalDays"`
-	DailyTargetMinutes int    `json:"dailyTargetMinutes"`
-	ActiveWeekdays     []int  `json:"activeWeekdays"`
-	StartDate          string `json:"startDate"`
-	CreatedAt          string `json:"createdAt"`
-	Status             string `json:"status"`
-}
-
-type GoalSummary struct {
-	Goal
-	CurrentStreak       int `json:"currentStreak"`
-	TodayMinutes        int `json:"todayMinutes"`
-	TodayProgressPct    int `json:"todayProgressPct"`
-	CurrentDay          int `json:"currentDay"`
-	TotalProgressPct    int `json:"totalProgressPct"`
-	TotalPracticeMinute int `json:"totalPracticeMinutes"`
-}
-
-type Session struct {
-	ID              int      `json:"id"`
-	GoalID          int      `json:"goalId"`
-	StartedAt       string   `json:"startedAt"`
-	EndedAt         string   `json:"endedAt"`
-	DurationMinutes int      `json:"durationMinutes"`
-	Notes           string   `json:"notes"`
-	Tags            []string `json:"tags"`
-	CreatedAt       string   `json:"createdAt"`
-}
-
-type GoalDetail struct {
-	GoalSummary
-	TodayRemainingMinutes int         `json:"todayRemainingMinutes"`
-	RecentSessions        []Session   `json:"recentSessions"`
-	Calendar              []DailyStat `json:"calendar"`
-}
-
-type CreateGoalRequest struct {
-	Title              string `json:"title"`
-	Description        string `json:"description"`
-	TotalDays          int    `json:"totalDays"`
-	DailyTargetMinutes int    `json:"dailyTargetMinutes"`
-	ActiveWeekdays     []int  `json:"activeWeekdays"`
-	StartDate          string `json:"startDate"`
-}
-
-type UpdateGoalRequest struct {
-	Title              string `json:"title"`
-	Description        string `json:"description"`
-	TotalDays          int    `json:"totalDays"`
-	DailyTargetMinutes int    `json:"dailyTargetMinutes"`
-	Status             string `json:"status"`
-}
-
-type CreateSessionRequest struct {
-	StartedAt       string   `json:"startedAt"`
-	EndedAt         string   `json:"endedAt"`
-	DurationMinutes int      `json:"durationMinutes"`
-	Notes           string   `json:"notes"`
-	Tags            []string `json:"tags"`
-}
-
-type UpdateSessionRequest struct {
-	Notes string   `json:"notes"`
-	Tags  []string `json:"tags"`
-}
-
-type Stats struct {
-	TotalSessions        int                `json:"totalSessions"`
-	TotalPracticeMinutes int                `json:"totalPracticeMinutes"`
-	CurrentStreak        int                `json:"currentStreak"`
-	LongestStreak        int                `json:"longestStreak"`
-	CompletedDays        int                `json:"completedDays"`
-	MissedDays           int                `json:"missedDays"`
-	CompletionRate       int                `json:"completionRate"`
-	WeeklyCompletionRate int                `json:"weeklyCompletionRate"`
-	PreviousWeekMinutes  int                `json:"previousWeekMinutes"`
-	WeekComparisonPct    int                `json:"weekComparisonPct"`
-	TodayMinutes         int                `json:"todayMinutes"`
-	DailyTargetMinutes   int                `json:"dailyTargetMinutes"`
-	Weekly               []DailyStat        `json:"weekly"`
-	Calendar             []DailyStat        `json:"calendar"`
-	MonthlyTotalMinutes  int                `json:"monthlyTotalMinutes"`
-	GoalDistribution     []GoalDistribution `json:"goalDistribution"`
-	GoalID               int                `json:"goalId"`
-	GoalTitle            string             `json:"goalTitle"`
-}
-
-type DailyStat struct {
-	Date          string `json:"date"`
-	Label         string `json:"label"`
-	Minutes       int    `json:"minutes"`
-	TargetMinutes int    `json:"targetMinutes"`
-	IsCompleted   bool   `json:"isCompleted"`
-}
-
-type GoalDistribution struct {
-	GoalID  int    `json:"goalId"`
-	Title   string `json:"title"`
-	Minutes int    `json:"minutes"`
-	Percent int    `json:"percent"`
-}
-
 func main() {
 	database, err := openDatabase()
 	if err != nil {
@@ -194,42 +48,22 @@ func main() {
 	}
 }
 
-func newRouter() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler)
-	mux.HandleFunc("POST /auth/register", registerHandler)
-	mux.HandleFunc("POST /auth/login", loginHandler)
-	mux.HandleFunc("POST /auth/logout", logoutHandler)
-	mux.HandleFunc("GET /me", meHandler)
-	mux.HandleFunc("PATCH /me", updateMeHandler)
-	mux.HandleFunc("PATCH /me/password", changePasswordHandler)
-	mux.HandleFunc("GET /entries", entriesHandler)
-	mux.HandleFunc("POST /entries", createEntryHandler)
-	mux.HandleFunc("GET /goals", goalsHandler)
-	mux.HandleFunc("POST /goals", createGoalHandler)
-	mux.HandleFunc("GET /goals/{id}", goalDetailHandler)
-	mux.HandleFunc("PATCH /goals/{id}", updateGoalHandler)
-	mux.HandleFunc("DELETE /goals/{id}", deleteGoalHandler)
-	mux.HandleFunc("POST /goals/{id}/sessions", createSessionHandler)
-	mux.HandleFunc("PATCH /goals/{id}/sessions/{sessionId}", updateSessionHandler)
-	mux.HandleFunc("DELETE /goals/{id}/sessions/{sessionId}", deleteSessionHandler)
-	mux.HandleFunc("GET /stats", statsHandler)
-
-	return securityMiddleware(mux)
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"status": "ok"}, http.StatusOK)
-}
-
 func openDatabase() (*sql.DB, error) {
 	dbPath := os.Getenv("PROGRESS_TRACKER_DB_PATH")
 	if dbPath == "" {
 		dbPath = "data/progress.db"
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		return nil, err
+	if dbPath != ":memory:" {
+		directory := filepath.Dir(dbPath)
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			return nil, err
+		}
+		if directory != "." {
+			if err := os.Chmod(directory, 0700); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	database, err := sql.Open("sqlite", dbPath)
@@ -239,6 +73,12 @@ func openDatabase() (*sql.DB, error) {
 	if err := configureDatabase(database, dbPath); err != nil {
 		database.Close()
 		return nil, err
+	}
+	if dbPath != ":memory:" {
+		if err := os.Chmod(dbPath, 0600); err != nil {
+			database.Close()
+			return nil, err
+		}
 	}
 
 	queries := []string{
@@ -599,8 +439,16 @@ func loadSessions(goalID int, limit int) ([]Session, error) {
 	return sessions, rows.Err()
 }
 
+type sessionQueryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func loadSession(goalID int, sessionID int) (Session, error) {
-	row := db.QueryRow(`
+	return loadSessionWith(db, goalID, sessionID)
+}
+
+func loadSessionWith(queryer sessionQueryer, goalID int, sessionID int) (Session, error) {
+	row := queryer.QueryRow(`
 		SELECT id, goal_id, started_at, ended_at, duration_minutes, notes, tags, created_at
 		FROM sessions
 		WHERE goal_id = ? AND id = ?
@@ -610,32 +458,20 @@ func loadSession(goalID int, sessionID int) (Session, error) {
 }
 
 func loadSessionForDate(goalID int, date string) (Session, bool, error) {
-	rows, err := db.Query(`
+	return loadSessionForDateWith(db, goalID, date)
+}
+
+func loadSessionForDateWith(queryer sessionQueryer, goalID int, date string) (Session, bool, error) {
+	row := queryer.QueryRow(`
 		SELECT id, goal_id, started_at, ended_at, duration_minutes, notes, tags, created_at
 		FROM sessions
-		WHERE goal_id = ?
-		ORDER BY ended_at DESC, id DESC
-	`, goalID)
-	if err != nil {
-		return Session{}, false, err
+		WHERE goal_id = ? AND session_date = ?
+	`, goalID, date)
+	session, err := scanSession(row)
+	if err == sql.ErrNoRows {
+		return Session{}, false, nil
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		session, err := scanSession(rows)
-		if err != nil {
-			return Session{}, false, err
-		}
-		if sessionDateString(session.EndedAt) == date {
-			return session, true, nil
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return Session{}, false, err
-	}
-
-	return Session{}, false, nil
+	return session, err == nil, err
 }
 
 type sessionScanner interface {

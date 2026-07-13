@@ -23,7 +23,14 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	sessionDate := sessionDateString(request.EndedAt)
 	createdAt := time.Now().Format(time.RFC3339)
-	existingSession, hasExistingSession, err := loadSessionForDate(goal.ID, sessionDate)
+	tx, err := db.Begin()
+	if err != nil {
+		writeError(w, "failed to start session save", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	existingSession, hasExistingSession, err := loadSessionForDateWith(tx, goal.ID, sessionDate)
 	if err != nil {
 		writeError(w, "failed to load daily session", http.StatusInternalServerError)
 		return
@@ -36,7 +43,7 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		updatedNotes := mergeSessionNotes(existingSession.Notes, request.Notes)
 		updatedTags := mergeTags(existingSession.Tags, request.Tags)
-		_, err := db.Exec(`
+		_, err := tx.Exec(`
 			UPDATE sessions
 			SET ended_at = ?, duration_minutes = ?, notes = ?, tags = ?
 			WHERE id = ? AND goal_id = ?
@@ -46,9 +53,13 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		session, err := loadSession(goal.ID, existingSession.ID)
+		session, err := loadSessionWith(tx, goal.ID, existingSession.ID)
 		if err != nil {
 			writeError(w, "failed to load daily session", http.StatusInternalServerError)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeError(w, "failed to finish daily session", http.StatusInternalServerError)
 			return
 		}
 
@@ -61,21 +72,24 @@ func createSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := db.Exec(`
+	result, err := tx.Exec(`
 		INSERT INTO sessions (
 			goal_id, started_at, ended_at, duration_minutes,
-			notes, tags, created_at
+			notes, tags, created_at, session_date
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, goal.ID, request.StartedAt, request.EndedAt, request.DurationMinutes, request.Notes, tagsToString(request.Tags), createdAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, goal.ID, request.StartedAt, request.EndedAt, request.DurationMinutes, request.Notes, tagsToString(request.Tags), createdAt, sessionDate)
 	if err != nil {
 		writeError(w, "failed to save session", http.StatusInternalServerError)
 		return
 	}
-
 	id, err := result.LastInsertId()
 	if err != nil {
 		writeError(w, "failed to read created session", http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, "failed to finish session save", http.StatusInternalServerError)
 		return
 	}
 

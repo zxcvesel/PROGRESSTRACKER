@@ -90,6 +90,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := loadUserByEmail(email)
 	if err == sql.ErrNoRows {
+		verifyPassword(request.Password, dummyPasswordHash)
 		writeError(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}

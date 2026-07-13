@@ -16,6 +16,11 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+var dummyPasswordHash = func() string {
+	salt := sha256.Sum256([]byte("progress-tracker-dummy-login-hash"))
+	return encodePasswordHash("invalid-password", salt[:passwordSaltBytes])
+}()
+
 func randomToken(size int) (string, error) {
 	bytes := make([]byte, size)
 	if _, err := rand.Read(bytes); err != nil {
@@ -67,6 +72,10 @@ func hashPassword(password string) (string, error) {
 		return "", err
 	}
 
+	return encodePasswordHash(password, salt), nil
+}
+
+func encodePasswordHash(password string, salt []byte) string {
 	key := argon2.IDKey([]byte(password), salt, passwordTime, passwordMemory, passwordThreads, passwordKeyBytes)
 	return fmt.Sprintf(
 		"%s$v=19$m=%d,t=%d,p=%d$%s$%s",
@@ -76,7 +85,7 @@ func hashPassword(password string) (string, error) {
 		passwordThreads,
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(key),
-	), nil
+	)
 }
 
 func verifyPassword(password string, storedHash string) bool {
