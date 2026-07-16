@@ -52,5 +52,11 @@ jobs:
         run: npm run lint
       - name: Build
         run: npm run build
+      - name: Unit tests
+        run: npm test
       - name: Audit dependencies
         run: npm audit --audit-level=high
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run test:e2e

@@ -38,12 +38,17 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "failed to protect password", http.StatusInternalServerError)
 		return
 	}
+	timezone, validTimezone := normalizeTimezone(request.Timezone)
+	if !validTimezone {
+		writeError(w, "invalid timezone", http.StatusBadRequest)
+		return
+	}
 
 	createdAt := time.Now().Format(time.RFC3339)
 	result, err := db.Exec(`
-		INSERT INTO users (email, name, password_hash, created_at)
-		VALUES (?, ?, ?, ?)
-	`, email, name, passwordHash, createdAt)
+		INSERT INTO users (email, name, password_hash, created_at, email_verified, timezone)
+		VALUES (?, ?, ?, ?, 0, ?)
+	`, email, name, passwordHash, createdAt, timezone)
 	if err != nil {
 		writeError(w, "user already exists", http.StatusConflict)
 		return
@@ -56,19 +61,57 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := User{
-		ID:        int(id),
-		Email:     email,
-		Name:      name,
-		CreatedAt: createdAt,
+		ID:            int(id),
+		Email:         email,
+		Name:          name,
+		CreatedAt:     createdAt,
+		EmailVerified: false,
+		Timezone:      timezone,
 	}
 	token, err := createAuthSession(user.ID)
 	if err != nil {
+		cleanupIncompleteRegistration(user.ID)
 		writeError(w, "failed to create session", http.StatusInternalServerError)
 		return
 	}
 	setAuthCookie(w, token)
+	verificationToken, err := issueActionToken(user.ID, "verify_email", verificationTokenLifetime)
+	if err != nil {
+		cleanupIncompleteRegistration(user.ID)
+		clearAuthCookie(w)
+		writeError(w, "failed to create verification link", http.StatusInternalServerError)
+		return
+	}
+	if err := sendAccountActionEmail(user.Email, "verify_email", verificationToken); err != nil {
+		cleanupIncompleteRegistration(user.ID)
+		clearAuthCookie(w)
+		writeError(w, "failed to send verification email", http.StatusServiceUnavailable)
+		return
+	}
 
-	writeJSON(w, AuthResponse{User: user}, http.StatusCreated)
+	response := AuthResponse{User: user}
+	if developmentActionTokensEnabled() {
+		response.DevelopmentToken = verificationToken
+	}
+	writeJSON(w, response, http.StatusCreated)
+}
+
+func cleanupIncompleteRegistration(userID int) {
+	tx, err := db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	for _, query := range []string{
+		`DELETE FROM action_tokens WHERE user_id = ?`,
+		`DELETE FROM auth_sessions WHERE user_id = ?`,
+		`DELETE FROM users WHERE id = ?`,
+	} {
+		if _, err := tx.Exec(query, userID); err != nil {
+			return
+		}
+	}
+	_ = tx.Commit()
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +273,18 @@ func currentUserFromRequest(w http.ResponseWriter, r *http.Request) (User, bool)
 	return user, true
 }
 
+func currentVerifiedUserFromRequest(w http.ResponseWriter, r *http.Request) (User, bool) {
+	user, ok := currentUserFromRequest(w, r)
+	if !ok {
+		return User{}, false
+	}
+	if !user.EmailVerified {
+		writeError(w, "email verification is required", http.StatusForbidden)
+		return User{}, false
+	}
+	return user, true
+}
+
 func bearerToken(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
 	if strings.HasPrefix(header, "Bearer ") {
@@ -249,7 +304,7 @@ func bearerToken(r *http.Request) (string, bool) {
 
 func loadUserByEmail(email string) (User, error) {
 	row := db.QueryRow(`
-		SELECT id, email, name, password_hash, created_at
+		SELECT id, email, name, password_hash, created_at, email_verified, timezone
 		FROM users
 		WHERE email = ?
 	`, email)
@@ -257,9 +312,18 @@ func loadUserByEmail(email string) (User, error) {
 	return scanUser(row)
 }
 
+func loadUserByID(id int) (User, error) {
+	row := db.QueryRow(`
+		SELECT id, email, name, password_hash, created_at, email_verified, timezone
+		FROM users
+		WHERE id = ?
+	`, id)
+	return scanUser(row)
+}
+
 func loadUserByToken(token string) (User, error) {
 	row := db.QueryRow(`
-		SELECT users.id, users.email, users.name, users.password_hash, users.created_at
+		SELECT users.id, users.email, users.name, users.password_hash, users.created_at, users.email_verified, users.timezone
 		FROM auth_sessions
 		INNER JOIN users ON users.id = auth_sessions.user_id
 		WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
@@ -285,6 +349,8 @@ func scanUser(scanner userScanner) (User, error) {
 		&user.Name,
 		&user.PasswordHash,
 		&user.CreatedAt,
+		&user.EmailVerified,
+		&user.Timezone,
 	)
 	if err != nil {
 		return User{}, err

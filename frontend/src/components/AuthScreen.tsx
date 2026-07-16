@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 
-type AuthMode = 'login' | 'register'
+type AuthMode = 'login' | 'register' | 'forgot' | 'reset'
 
 type AuthForm = {
   email: string
@@ -24,12 +24,19 @@ type AuthCopy = {
   signIn: string
   haveAccount: string
   noAccount: string
+  forgotPassword: string
+  forgotPasswordTitle: string
+  resetPasswordTitle: string
+  sendResetLink: string
+  resetPassword: string
+  backToSignIn: string
 }
 
 type AuthScreenProps = {
   mode: AuthMode
   form: AuthForm
   error: string
+  message: string
   copy: AuthCopy
   onModeChange: (mode: AuthMode) => void
   onChange: (form: AuthForm) => void
@@ -40,12 +47,15 @@ export function AuthScreen({
   mode,
   form,
   error,
+  message,
   copy,
   onModeChange,
   onChange,
   onSubmit,
 }: AuthScreenProps) {
   const isRegister = mode === 'register'
+  const isForgot = mode === 'forgot'
+  const isReset = mode === 'reset'
   const [showPassword, setShowPassword] = useState(false)
 
   return (
@@ -54,12 +64,18 @@ export function AuthScreen({
         <FlameIcon />
       </div>
       <div>
-        <h1>{isRegister ? copy.registerTitle : copy.signInTitle}</h1>
+        <h1>{isRegister
+          ? copy.registerTitle
+          : isForgot
+            ? copy.forgotPasswordTitle
+            : isReset
+              ? copy.resetPasswordTitle
+              : copy.signInTitle}</h1>
         <p>{copy.authSubtitle}</p>
       </div>
 
       <form className="auth-form" onSubmit={onSubmit}>
-        <label>
+        {!isReset && <label>
           {copy.email}
           <input
             type="email"
@@ -68,7 +84,7 @@ export function AuthScreen({
             value={form.email}
             onChange={(event) => onChange({ ...form, email: event.target.value })}
           />
-        </label>
+        </label>}
 
         {isRegister && (
           <label>
@@ -82,12 +98,12 @@ export function AuthScreen({
           </label>
         )}
 
-        <label>
+        {!isForgot && <label>
           {copy.password}
           <span className="password-field">
             <input
               type={showPassword ? 'text' : 'password'}
-              autoComplete={isRegister ? 'new-password' : 'current-password'}
+              autoComplete={isRegister || isReset ? 'new-password' : 'current-password'}
               minLength={8}
               required
               value={form.password}
@@ -101,9 +117,9 @@ export function AuthScreen({
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </span>
-        </label>
+        </label>}
 
-        {isRegister && (
+        {(isRegister || isReset) && (
           <label>
             {copy.confirmPassword}
             <span className="password-field">
@@ -126,20 +142,34 @@ export function AuthScreen({
           </label>
         )}
 
-        <span className="form-hint">{copy.passwordHint}</span>
+        {!isForgot && <span className="form-hint">{copy.passwordHint}</span>}
+        {message && <p className="settings-success">{message}</p>}
         {error && <p className="form-error">{error}</p>}
 
         <button className="primary-button primary-button--large" type="submit">
-          {isRegister ? copy.createAccount : copy.signIn}
+          {isRegister
+            ? copy.createAccount
+            : isForgot
+              ? copy.sendResetLink
+              : isReset
+                ? copy.resetPassword
+                : copy.signIn}
         </button>
       </form>
 
+      {mode === 'login' && (
+        <button className="text-button" type="button" onClick={() => onModeChange('forgot')}>
+          {copy.forgotPassword}
+        </button>
+      )}
       <button
         className="ghost-button auth-switch"
         type="button"
-        onClick={() => onModeChange(isRegister ? 'login' : 'register')}
+        onClick={() => onModeChange(isRegister || isForgot || isReset ? 'login' : 'register')}
       >
-        {isRegister ? copy.haveAccount : copy.noAccount} {isRegister ? copy.signIn : copy.createAccount}
+        {isForgot || isReset
+          ? copy.backToSignIn
+          : <>{isRegister ? copy.haveAccount : copy.noAccount} {isRegister ? copy.signIn : copy.createAccount}</>}
       </button>
     </section>
   )

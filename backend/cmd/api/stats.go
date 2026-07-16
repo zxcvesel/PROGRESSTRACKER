@@ -7,7 +7,7 @@ import (
 )
 
 func statsHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
+	user, ok := currentVerifiedUserFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -40,7 +40,7 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := todayString()
+	today := todayStringForUser(user.ID)
 	todayMinutes, err := loadMinutesForDate(today, goalID, user.ID)
 	if err != nil {
 		writeError(w, "failed to load today's stats", http.StatusInternalServerError)
@@ -86,8 +86,9 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	weekStart := dateOnly(time.Now()).AddDate(0, 0, -6).Format(time.DateOnly)
-	weekEnd := todayString()
+	localToday := dateOnlyForUser(user.ID, time.Now())
+	weekStart := localToday.AddDate(0, 0, -6).Format(time.DateOnly)
+	weekEnd := today
 	_, _, weeklyCompletionRate, err := loadCompletionSummary(goalID, user.ID, weekStart, weekEnd)
 	if err != nil {
 		writeError(w, "failed to load weekly completion stats", http.StatusInternalServerError)
@@ -100,8 +101,8 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	previousWeekStart := dateOnly(time.Now()).AddDate(0, 0, -13).Format(time.DateOnly)
-	previousWeekEnd := dateOnly(time.Now()).AddDate(0, 0, -7).Format(time.DateOnly)
+	previousWeekStart := localToday.AddDate(0, 0, -13).Format(time.DateOnly)
+	previousWeekEnd := localToday.AddDate(0, 0, -7).Format(time.DateOnly)
 	previousWeekMinutes, err := loadMinutesBetween(previousWeekStart, previousWeekEnd, goalID, user.ID)
 	if err != nil {
 		writeError(w, "failed to load previous week stats", http.StatusInternalServerError)

@@ -186,49 +186,6 @@ func TestCurrentStreakResetsAfterMissedDay(t *testing.T) {
 	}
 }
 
-func TestCreateSessionMergesSameDaySession(t *testing.T) {
-	setupTestDatabase(t)
-
-	_, err := db.Exec(`
-		INSERT INTO goals (id, title, description, total_days, daily_target_minutes, active_weekdays, start_date, created_at, status)
-		VALUES (1, 'Merge test', '', 30, 10, '1,2,3,4,5,6,7', ?, ?, 'active')
-	`, todayString(), time.Now().Format(time.RFC3339))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, body := range []string{
-		`{"startedAt":"2026-07-01T10:00:00+03:00","endedAt":"2026-07-01T10:04:00+03:00","durationMinutes":4,"notes":"first","tags":["api"]}`,
-		`{"startedAt":"2026-07-01T13:00:00+03:00","endedAt":"2026-07-01T13:06:00+03:00","durationMinutes":6,"notes":"second","tags":["stats"]}`,
-	} {
-		request := httptest.NewRequest(http.MethodPost, "/goals/1/sessions", strings.NewReader(body))
-		request.SetPathValue("id", "1")
-		request.Header.Set("Authorization", "Bearer "+testAuthToken(t))
-		response := httptest.NewRecorder()
-
-		createSessionHandler(response, request)
-
-		if response.Code != http.StatusCreated && response.Code != http.StatusOK {
-			t.Fatalf("createSessionHandler status = %d, body = %s", response.Code, response.Body.String())
-		}
-	}
-
-	sessions, err := loadSessions(1, 12)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(sessions) != 1 {
-		t.Fatalf("sessions count = %d, want 1", len(sessions))
-	}
-	if sessions[0].DurationMinutes != 10 {
-		t.Fatalf("duration = %d, want 10", sessions[0].DurationMinutes)
-	}
-	if !strings.Contains(sessions[0].Notes, "first") || !strings.Contains(sessions[0].Notes, "second") {
-		t.Fatalf("merged notes = %q, want both notes", sessions[0].Notes)
-	}
-}
-
 func TestGoalSummaryCountsCompletedDays(t *testing.T) {
 	setupTestDatabase(t)
 
@@ -299,6 +256,14 @@ func TestAuthHandlersRegisterLoginAndProtectGoals(t *testing.T) {
 	token := authCookieValue(t, registerResponse)
 	if token == "" || auth.User.ID == 0 {
 		t.Fatalf("auth response = %+v, want cookie token and user", auth)
+	}
+	verifyRequest := httptest.NewRequest(http.MethodPost, "/auth/verify-email", strings.NewReader(
+		`{"token":"`+auth.DevelopmentToken+`"}`,
+	))
+	verifyResponse := httptest.NewRecorder()
+	verifyEmailHandler(verifyResponse, verifyRequest)
+	if verifyResponse.Code != http.StatusOK {
+		t.Fatalf("verify status = %d, body = %s", verifyResponse.Code, verifyResponse.Body.String())
 	}
 
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{

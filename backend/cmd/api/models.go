@@ -1,21 +1,28 @@
 package main
 
 type User struct {
-	ID           int    `json:"id"`
-	Email        string `json:"email"`
-	Name         string `json:"name"`
-	PasswordHash string `json:"-"`
-	CreatedAt    string `json:"createdAt"`
+	ID            int    `json:"id"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	PasswordHash  string `json:"-"`
+	CreatedAt     string `json:"createdAt"`
+	EmailVerified bool   `json:"emailVerified"`
+	Timezone      string `json:"timezone"`
 }
 
 type AuthRequest struct {
 	Email    string `json:"email"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
+	Timezone string `json:"timezone"`
 }
 
 type UpdateProfileRequest struct {
 	Name string `json:"name"`
+}
+
+type UpdateTimezoneRequest struct {
+	Timezone string `json:"timezone"`
 }
 
 type ChangePasswordRequest struct {
@@ -24,7 +31,30 @@ type ChangePasswordRequest struct {
 }
 
 type AuthResponse struct {
-	User User `json:"user"`
+	User             User   `json:"user"`
+	DevelopmentToken string `json:"developmentToken,omitempty"`
+}
+
+type ActionTokenRequest struct {
+	Token string `json:"token"`
+}
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"newPassword"`
+}
+
+type DeleteAccountRequest struct {
+	Password string `json:"password"`
+}
+
+type ActionResponse struct {
+	Message          string `json:"message"`
+	DevelopmentToken string `json:"developmentToken,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -97,17 +127,32 @@ type UpdateGoalRequest struct {
 	Status             string `json:"status"`
 }
 
-type CreateSessionRequest struct {
-	StartedAt       string   `json:"startedAt"`
-	EndedAt         string   `json:"endedAt"`
-	DurationMinutes int      `json:"durationMinutes"`
-	Notes           string   `json:"notes"`
-	Tags            []string `json:"tags"`
-}
-
 type UpdateSessionRequest struct {
 	Notes string   `json:"notes"`
 	Tags  []string `json:"tags"`
+}
+
+type StartTimerRequest struct {
+	SpeedMultiplier float64 `json:"speedMultiplier"`
+}
+
+type FinishTimerRequest struct {
+	Notes string   `json:"notes"`
+	Tags  []string `json:"tags"`
+}
+
+type TimerState struct {
+	GoalID          int     `json:"goalId"`
+	State           string  `json:"state"`
+	StartedAt       string  `json:"startedAt"`
+	ElapsedSeconds  int     `json:"elapsedSeconds"`
+	TargetSeconds   int     `json:"targetSeconds"`
+	SpeedMultiplier float64 `json:"speedMultiplier"`
+}
+
+type TimerStatusResponse struct {
+	Active bool        `json:"active"`
+	Timer  *TimerState `json:"timer,omitempty"`
 }
 
 type Stats struct {

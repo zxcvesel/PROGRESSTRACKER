@@ -1,0 +1,63 @@
+import { expect, test } from '@playwright/test'
+
+test('registers, creates a goal, and saves a server-timed session', async ({ page }) => {
+  const email = `e2e-${Date.now()}@example.com`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /No account yet.*Create account/i }).click()
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Name').fill('E2E User')
+  await page.getByLabel('Password', { exact: true }).fill('Password123!')
+  await page.getByLabel('Confirm password').fill('Password123!')
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
+
+  await expect(page.getByText('Create your first goal')).toBeVisible()
+  await page.locator('.empty-state').getByRole('button', { name: 'Create goal' }).click()
+  await page.getByLabel('Title').fill('Playwright goal')
+  await page.getByLabel('Description').fill('Verify the complete user flow')
+  await page.getByLabel('Days').fill('30')
+  await page.getByLabel('Daily target hours').fill('0')
+  await page.getByLabel('Minutes').fill('5')
+  await page.locator('form.entry-form').getByRole('button', { name: 'Create goal' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Playwright goal' })).toBeVisible()
+  await page.getByRole('button', { name: 'Start session' }).click()
+  await expect(page.getByText('Session running')).toBeVisible()
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await page.getByRole('button', { name: 'Finish session' }).click()
+  await expect(page.getByRole('heading', { name: 'Session completed' })).toBeVisible()
+  await page.getByLabel('Notes').fill('Completed through the server timer')
+  await page.getByRole('button', { name: 'Save session' }).click()
+
+  await expect(page.getByText('1m / 5m')).toBeVisible()
+})
+
+test('resets a forgotten password and invalidates the old one', async ({ page }) => {
+  const email = `reset-${Date.now()}@example.com`
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /No account yet.*Create account/i }).click()
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password', { exact: true }).fill('Password123!')
+  await page.getByLabel('Confirm password').fill('Password123!')
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
+  await expect(page.getByText('Create your first goal')).toBeVisible()
+
+  await page.request.post('/api/auth/logout', {
+    headers: { Origin: 'http://127.0.0.1:4174' },
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'Forgot password?' }).click()
+  await page.getByLabel('Email').fill(email)
+  await page.getByRole('button', { name: 'Send reset link' }).click()
+  await expect(page.getByRole('heading', { name: 'Set a new password' })).toBeVisible()
+  await page.getByLabel('Password', { exact: true }).fill('NewPassword123!')
+  await page.getByLabel('Confirm password').fill('NewPassword123!')
+  await page.getByRole('button', { name: 'Save new password' }).click()
+  await expect(page.getByText('Password updated. Sign in with your new password.')).toBeVisible()
+
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password', { exact: true }).fill('NewPassword123!')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByText('Create your first goal')).toBeVisible()
+})

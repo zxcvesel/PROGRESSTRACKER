@@ -64,6 +64,8 @@ type StatsCopy = {
   actualVsTarget: string
   month: string
   emptyDistribution: string
+  emptyStatsTitle: string
+  emptyStatsText: string
   calendar: string
   days: string
   completedDay: string
@@ -90,6 +92,15 @@ export function StatsScreen({
   language,
   onGoalChange,
 }: StatsScreenProps) {
+  if (goals.length === 0) {
+    return (
+      <section className="empty-state stats-empty-state">
+        <h1>{copy.emptyStatsTitle}</h1>
+        <p>{copy.emptyStatsText}</p>
+      </section>
+    )
+  }
+
   const todayPercent = percent(stats.todayMinutes, stats.dailyTargetMinutes)
   const remainingToday = Math.max(stats.dailyTargetMinutes - stats.todayMinutes, 0)
   const currentWeekMinutes = stats.weekly.reduce((total, day) => total + day.minutes, 0)

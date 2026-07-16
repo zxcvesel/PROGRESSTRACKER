@@ -2,5 +2,8 @@ backend/data/
 backend/cmd/api/data/
 backend/cmd/api/*.exe
 backend/.gocache/
+.cache/
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/

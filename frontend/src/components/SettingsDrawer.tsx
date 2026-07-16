@@ -43,6 +43,14 @@ type SettingsCopy = {
   passwordHint: string
   changePassword: string
   logout: string
+  logoutAll: string
+  deleteAccount: string
+  deleteAccountHint: string
+  deleteAccountConfirm: string
+  deleteAccountAction: string
+  exportData: string
+  exportJSON: string
+  exportCSV: string
   appearance: string
   theme: string
   themeDark: string
@@ -102,6 +110,9 @@ type SettingsDrawerProps = {
   onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void
   onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => void
   onLogout: () => void
+  onLogoutAll: () => void
+  onDeleteAccount: (password: string) => Promise<boolean>
+  onExport: (format: 'json' | 'csv') => void
   onToggleNotifications: () => void
 }
 
@@ -123,12 +134,19 @@ export function SettingsDrawer({
   onProfileSubmit,
   onPasswordSubmit,
   onLogout,
+  onLogoutAll,
+  onDeleteAccount,
+  onExport,
   onToggleNotifications,
 }: SettingsDrawerProps) {
   const [accountOpen, setAccountOpen] = useState(false)
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
+  const [deletePassword, setDeletePassword] = useState('')
 
   function closeDrawer() {
     setAccountOpen(false)
+    setDeleteAccountOpen(false)
+    setDeletePassword('')
     onClose()
   }
 
@@ -230,6 +248,46 @@ export function SettingsDrawer({
                 {accountError && <p className="form-error">{accountError}</p>}
 
                 <button className="ghost-button" type="button" onClick={onLogout}>{copy.logout}</button>
+                <button className="ghost-button" type="button" onClick={onLogoutAll}>{copy.logoutAll}</button>
+
+                <details className="settings-details">
+                  <summary>{copy.exportData}</summary>
+                  <div className="settings-inline-actions">
+                    <button className="ghost-button" type="button" onClick={() => onExport('json')}>{copy.exportJSON}</button>
+                    <button className="ghost-button" type="button" onClick={() => onExport('csv')}>{copy.exportCSV}</button>
+                  </div>
+                </details>
+
+                <details
+                  className="settings-details settings-details--danger"
+                  open={deleteAccountOpen}
+                  onToggle={(event) => setDeleteAccountOpen(event.currentTarget.open)}
+                >
+                  <summary>{copy.deleteAccount}</summary>
+                  <form
+                    className="settings-form"
+                    onSubmit={async (event) => {
+                      event.preventDefault()
+                      if (await onDeleteAccount(deletePassword)) {
+                        setDeletePassword('')
+                        setDeleteAccountOpen(false)
+                      }
+                    }}
+                  >
+                    <p className="settings-note settings-note--plain">{copy.deleteAccountHint}</p>
+                    <label>
+                      {copy.deleteAccountConfirm}
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        required
+                        value={deletePassword}
+                        onChange={(event) => setDeletePassword(event.target.value)}
+                      />
+                    </label>
+                    <button className="ghost-button danger-button" type="submit">{copy.deleteAccountAction}</button>
+                  </form>
+                </details>
               </div>
             )}
           </SettingsGroup>

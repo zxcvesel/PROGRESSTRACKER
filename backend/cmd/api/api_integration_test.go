@@ -68,7 +68,7 @@ func TestAPIProtectedRoutesRequireAuthentication(t *testing.T) {
 		{http.MethodGet, "/goals", ""},
 		{http.MethodPost, "/goals", `{"title":"Private","totalDays":30,"dailyTargetMinutes":10}`},
 		{http.MethodGet, "/goals/1", ""},
-		{http.MethodPost, "/goals/1/sessions", `{"startedAt":"2026-07-12T10:00:00+03:00","endedAt":"2026-07-12T10:10:00+03:00","durationMinutes":10}`},
+		{http.MethodPost, "/goals/1/timer/start", `{}`},
 		{http.MethodGet, "/stats", ""},
 	}
 
@@ -110,6 +110,10 @@ func TestAPIAuthCookieLifecycle(t *testing.T) {
 	me := apiRequest(t, router, http.MethodGet, "/me", "", cookie)
 	if me.Code != http.StatusOK {
 		t.Fatalf("me status = %d, body = %s", me.Code, me.Body.String())
+	}
+	unverifiedGoals := apiRequest(t, router, http.MethodGet, "/goals", "", cookie)
+	if unverifiedGoals.Code != http.StatusForbidden {
+		t.Fatalf("unverified goals status = %d, want %d", unverifiedGoals.Code, http.StatusForbidden)
 	}
 
 	logout := apiRequest(t, router, http.MethodPost, "/auth/logout", "", cookie)
@@ -157,6 +161,151 @@ func TestAPIAuthValidationAndDuplicateRegistration(t *testing.T) {
 	}`, nil)
 	if duplicate.Code != http.StatusConflict {
 		t.Fatalf("duplicate status = %d, body = %s", duplicate.Code, duplicate.Body.String())
+	}
+}
+
+func TestAPIEmailVerificationAndPasswordReset(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+
+	register := apiRequest(t, router, http.MethodPost, "/auth/register", `{
+		"email":"lifecycle@example.com","name":"Lifecycle","password":"Password123!"
+	}`, nil)
+	if register.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, body = %s", register.Code, register.Body.String())
+	}
+	var registered AuthResponse
+	decodeResponse(t, register, &registered)
+	if registered.User.EmailVerified || registered.DevelopmentToken == "" {
+		t.Fatalf("registration response = %+v", registered)
+	}
+	oldCookie := authCookie(t, register)
+
+	verify := apiRequest(t, router, http.MethodPost, "/auth/verify-email",
+		fmt.Sprintf(`{"token":%q}`, registered.DevelopmentToken), nil)
+	if verify.Code != http.StatusOK {
+		t.Fatalf("verify status = %d, body = %s", verify.Code, verify.Body.String())
+	}
+	var verified AuthResponse
+	decodeResponse(t, verify, &verified)
+	if !verified.User.EmailVerified {
+		t.Fatalf("verified user = %+v", verified.User)
+	}
+	reusedVerification := apiRequest(t, router, http.MethodPost, "/auth/verify-email",
+		fmt.Sprintf(`{"token":%q}`, registered.DevelopmentToken), nil)
+	if reusedVerification.Code != http.StatusBadRequest {
+		t.Fatalf("reused verification status = %d", reusedVerification.Code)
+	}
+
+	forgot := apiRequest(t, router, http.MethodPost, "/auth/forgot-password", `{"email":"lifecycle@example.com"}`, nil)
+	if forgot.Code != http.StatusOK {
+		t.Fatalf("forgot password status = %d, body = %s", forgot.Code, forgot.Body.String())
+	}
+	var action ActionResponse
+	decodeResponse(t, forgot, &action)
+	if action.DevelopmentToken == "" {
+		t.Fatal("development reset token was not returned")
+	}
+
+	reset := apiRequest(t, router, http.MethodPost, "/auth/reset-password",
+		fmt.Sprintf(`{"token":%q,"newPassword":"NewPassword123!"}`, action.DevelopmentToken), nil)
+	if reset.Code != http.StatusNoContent {
+		t.Fatalf("reset password status = %d, body = %s", reset.Code, reset.Body.String())
+	}
+	reusedReset := apiRequest(t, router, http.MethodPost, "/auth/reset-password",
+		fmt.Sprintf(`{"token":%q,"newPassword":"AnotherPassword123!"}`, action.DevelopmentToken), nil)
+	if reusedReset.Code != http.StatusBadRequest {
+		t.Fatalf("reused reset status = %d", reusedReset.Code)
+	}
+
+	me := apiRequest(t, router, http.MethodGet, "/me", "", oldCookie)
+	if me.Code != http.StatusUnauthorized {
+		t.Fatalf("old session after reset status = %d", me.Code)
+	}
+	oldLogin := apiRequest(t, router, http.MethodPost, "/auth/login",
+		`{"email":"lifecycle@example.com","password":"Password123!"}`, nil)
+	if oldLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("old password login status = %d", oldLogin.Code)
+	}
+	newLogin := apiRequest(t, router, http.MethodPost, "/auth/login",
+		`{"email":"lifecycle@example.com","password":"NewPassword123!"}`, nil)
+	if newLogin.Code != http.StatusOK {
+		t.Fatalf("new password login status = %d, body = %s", newLogin.Code, newLogin.Body.String())
+	}
+}
+
+func TestAPILogoutAllAndDeleteAccount(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	cookie := registerAPIUser(t, router, "delete-account@example.com")
+	goal := createAPIGoal(t, router, cookie, "Private goal", 5)
+	createSessionForGoal(t, router, cookie, goal.ID, 1)
+
+	wrongDelete := apiRequest(t, router, http.MethodDelete, "/me", `{"password":"WrongPassword123!"}`, cookie)
+	if wrongDelete.Code != http.StatusBadRequest {
+		t.Fatalf("wrong password delete status = %d", wrongDelete.Code)
+	}
+
+	logoutAll := apiRequest(t, router, http.MethodDelete, "/me/sessions", "", cookie)
+	if logoutAll.Code != http.StatusNoContent {
+		t.Fatalf("logout all status = %d, body = %s", logoutAll.Code, logoutAll.Body.String())
+	}
+	if response := apiRequest(t, router, http.MethodGet, "/me", "", cookie); response.Code != http.StatusUnauthorized {
+		t.Fatalf("session survived logout all: %d", response.Code)
+	}
+
+	login := apiRequest(t, router, http.MethodPost, "/auth/login",
+		`{"email":"delete-account@example.com","password":"Password123!"}`, nil)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login before delete status = %d, body = %s", login.Code, login.Body.String())
+	}
+	deleteCookie := authCookie(t, login)
+	remove := apiRequest(t, router, http.MethodDelete, "/me", `{"password":"Password123!"}`, deleteCookie)
+	if remove.Code != http.StatusNoContent {
+		t.Fatalf("delete account status = %d, body = %s", remove.Code, remove.Body.String())
+	}
+
+	var users int
+	var goals int
+	var sessions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = 'delete-account@example.com'`).Scan(&users); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM goals WHERE id = ?`, goal.ID).Scan(&goals); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE goal_id = ?`, goal.ID).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if users != 0 || goals != 0 || sessions != 0 {
+		t.Fatalf("account data remained: users=%d goals=%d sessions=%d", users, goals, sessions)
+	}
+}
+
+func TestAPIAccountExportIsScopedAndSupportsCSV(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	first := registerAPIUser(t, router, "export-one@example.com")
+	second := registerAPIUser(t, router, "export-two@example.com")
+	firstGoal := createAPIGoal(t, router, first, "Exported goal", 30)
+	createSessionForGoal(t, router, first, firstGoal.ID, 12)
+	secondGoal := createAPIGoal(t, router, second, "Private goal", 30)
+	createSessionForGoal(t, router, second, secondGoal.ID, 15)
+
+	jsonExport := apiRequest(t, router, http.MethodGet, "/me/export", "", first)
+	if jsonExport.Code != http.StatusOK {
+		t.Fatalf("JSON export status = %d, body = %s", jsonExport.Code, jsonExport.Body.String())
+	}
+	if !strings.Contains(jsonExport.Body.String(), "Exported goal") || strings.Contains(jsonExport.Body.String(), "Private goal") {
+		t.Fatalf("JSON export is not account-scoped: %s", jsonExport.Body.String())
+	}
+
+	csvExport := apiRequest(t, router, http.MethodGet, "/me/export?format=csv", "", first)
+	if csvExport.Code != http.StatusOK || !strings.Contains(csvExport.Header().Get("Content-Type"), "text/csv") {
+		t.Fatalf("CSV export status = %d, content-type = %s", csvExport.Code, csvExport.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(csvExport.Body.String(), "Exported goal") || strings.Contains(csvExport.Body.String(), "Private goal") {
+		t.Fatalf("CSV export is not account-scoped: %s", csvExport.Body.String())
 	}
 }
 
@@ -241,7 +390,7 @@ func TestAPIAccountsCannotAccessEachOthersGoalsOrStats(t *testing.T) {
 		{http.MethodGet, fmt.Sprintf("/goals/%d", goal.ID), ""},
 		{http.MethodPatch, fmt.Sprintf("/goals/%d", goal.ID), `{"title":"Hijacked","totalDays":10,"dailyTargetMinutes":10}`},
 		{http.MethodDelete, fmt.Sprintf("/goals/%d", goal.ID), ""},
-		{http.MethodPost, fmt.Sprintf("/goals/%d/sessions", goal.ID), sessionJSON(5)},
+		{http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", goal.ID), `{}`},
 		{http.MethodGet, fmt.Sprintf("/stats?goalId=%d", goal.ID), ""},
 	}
 
@@ -265,12 +414,10 @@ func TestAPISessionLifecycleRecalculatesProgressAndStats(t *testing.T) {
 	goal := createAPIGoal(t, router, cookie, "Daily API", 10)
 
 	first := createSessionForGoal(t, router, cookie, goal.ID, 4)
-	secondResponse := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/sessions", goal.ID), sessionJSON(6), cookie)
+	secondResponse, merged := finishServerTimerForGoal(t, router, cookie, goal.ID, 6)
 	if secondResponse.Code != http.StatusOK {
 		t.Fatalf("merged session status = %d, body = %s", secondResponse.Code, secondResponse.Body.String())
 	}
-	var merged Session
-	decodeResponse(t, secondResponse, &merged)
 	if merged.ID != first.ID || merged.DurationMinutes != 10 {
 		t.Fatalf("merged session = %+v", merged)
 	}
@@ -311,6 +458,88 @@ func TestAPISessionLifecycleRecalculatesProgressAndStats(t *testing.T) {
 	}
 }
 
+func TestAPIServerTimerLifecycle(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	cookie := registerAPIUser(t, router, "timer@example.com")
+	goal := createAPIGoal(t, router, cookie, "Server timer", 10)
+	otherGoal := createAPIGoal(t, router, cookie, "Other goal", 10)
+
+	start := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", goal.ID), `{"speedMultiplier":5}`, cookie)
+	if start.Code != http.StatusCreated {
+		t.Fatalf("start timer status = %d, body = %s", start.Code, start.Body.String())
+	}
+	var started TimerState
+	decodeResponse(t, start, &started)
+	if started.State != "running" || started.GoalID != goal.ID || started.TargetSeconds != 600 || started.SpeedMultiplier != 5 {
+		t.Fatalf("started timer = %+v", started)
+	}
+
+	conflict := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", otherGoal.ID), `{}`, cookie)
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("second timer status = %d, body = %s", conflict.Code, conflict.Body.String())
+	}
+
+	pause := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/pause", goal.ID), "", cookie)
+	if pause.Code != http.StatusOK {
+		t.Fatalf("pause timer status = %d, body = %s", pause.Code, pause.Body.String())
+	}
+	var paused TimerState
+	decodeResponse(t, pause, &paused)
+	if paused.State != "paused" {
+		t.Fatalf("paused timer = %+v", paused)
+	}
+
+	active := apiRequest(t, router, http.MethodGet, "/timer", "", cookie)
+	var status TimerStatusResponse
+	decodeResponse(t, active, &status)
+	if !status.Active || status.Timer == nil || status.Timer.State != "paused" {
+		t.Fatalf("active timer response = %+v", status)
+	}
+
+	resume := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/resume", goal.ID), "", cookie)
+	if resume.Code != http.StatusOK {
+		t.Fatalf("resume timer status = %d, body = %s", resume.Code, resume.Body.String())
+	}
+
+	forged := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/finish", goal.ID),
+		`{"notes":"Practice","tags":["Timer"],"durationMinutes":600}`, cookie)
+	if forged.Code != http.StatusBadRequest {
+		t.Fatalf("forged duration status = %d, body = %s", forged.Code, forged.Body.String())
+	}
+
+	finish := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/finish", goal.ID),
+		`{"notes":"Server measured practice","tags":["Timer"]}`, cookie)
+	if finish.Code != http.StatusCreated {
+		t.Fatalf("finish timer status = %d, body = %s", finish.Code, finish.Body.String())
+	}
+	var session Session
+	decodeResponse(t, finish, &session)
+	if session.DurationMinutes != 1 || session.Notes != "Server measured practice" {
+		t.Fatalf("finished timer session = %+v", session)
+	}
+
+	inactive := apiRequest(t, router, http.MethodGet, "/timer", "", cookie)
+	var inactiveStatus TimerStatusResponse
+	decodeResponse(t, inactive, &inactiveStatus)
+	if inactiveStatus.Active || inactiveStatus.Timer != nil {
+		t.Fatalf("timer remained active after finish: %+v", inactiveStatus)
+	}
+}
+
+func TestAPIServerTimerSpeedIsDevelopmentOnly(t *testing.T) {
+	setupTestDatabase(t)
+	t.Setenv("PROGRESS_TRACKER_HOST", "0.0.0.0")
+	router := newRouter()
+	cookie := registerAPIUser(t, router, "timer-production@example.com")
+	goal := createAPIGoal(t, router, cookie, "Production timer", 10)
+
+	response := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", goal.ID), `{"speedMultiplier":5}`, cookie)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("production speed status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAPIRejectsInvalidResourceInput(t *testing.T) {
 	setupTestDatabase(t)
 	router := newRouter()
@@ -326,7 +555,7 @@ func TestAPIRejectsInvalidResourceInput(t *testing.T) {
 		{http.MethodPost, "/goals", `{"title":"","totalDays":0,"dailyTargetMinutes":0}`, http.StatusBadRequest},
 		{http.MethodGet, "/goals/not-a-number", "", http.StatusBadRequest},
 		{http.MethodPatch, fmt.Sprintf("/goals/%d", goal.ID), `{"title":"Goal","totalDays":10,"dailyTargetMinutes":10,"status":"unknown"}`, http.StatusBadRequest},
-		{http.MethodPost, fmt.Sprintf("/goals/%d/sessions", goal.ID), `{"startedAt":"","endedAt":"","durationMinutes":0}`, http.StatusBadRequest},
+		{http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", goal.ID), `{"speedMultiplier":3}`, http.StatusBadRequest},
 		{http.MethodPatch, fmt.Sprintf("/goals/%d/sessions/not-a-number", goal.ID), `{}`, http.StatusBadRequest},
 		{http.MethodGet, "/stats?goalId=invalid", "", http.StatusBadRequest},
 		{http.MethodGet, "/stats?goalId=-1", "", http.StatusBadRequest},
@@ -451,12 +680,26 @@ func apiRequest(t *testing.T, router http.Handler, method string, path string, b
 func registerAPIUser(t *testing.T, router http.Handler, email string) *http.Cookie {
 	t.Helper()
 
-	body := fmt.Sprintf(`{"email":%q,"name":"Test User","password":"Password123!"}`, email)
+	body := fmt.Sprintf(`{"email":%q,"name":"Test User","password":"Password123!","timezone":"Europe/Moscow"}`, email)
 	response := apiRequest(t, router, http.MethodPost, "/auth/register", body, nil)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("register %s status = %d, body = %s", email, response.Code, response.Body.String())
 	}
-	return authCookie(t, response)
+	cookie := authCookie(t, response)
+	var registered AuthResponse
+	decodeResponse(t, response, &registered)
+	if registered.DevelopmentToken == "" {
+		if _, err := db.Exec(`UPDATE users SET email_verified = 1 WHERE email = ?`, email); err != nil {
+			t.Fatal(err)
+		}
+		return cookie
+	}
+	verification := apiRequest(t, router, http.MethodPost, "/auth/verify-email",
+		fmt.Sprintf(`{"token":%q}`, registered.DevelopmentToken), nil)
+	if verification.Code != http.StatusOK {
+		t.Fatalf("verify %s status = %d, body = %s", email, verification.Code, verification.Body.String())
+	}
+	return cookie
 }
 
 func authCookie(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie {
@@ -487,20 +730,36 @@ func createAPIGoal(t *testing.T, router http.Handler, cookie *http.Cookie, title
 func createSessionForGoal(t *testing.T, router http.Handler, cookie *http.Cookie, goalID int, minutes int) Session {
 	t.Helper()
 
-	response := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/sessions", goalID), sessionJSON(minutes), cookie)
+	response, session := finishServerTimerForGoal(t, router, cookie, goalID, minutes)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create session status = %d, body = %s", response.Code, response.Body.String())
 	}
-	var session Session
-	decodeResponse(t, response, &session)
 	return session
 }
 
-func sessionJSON(minutes int) string {
-	end := time.Now().In(time.Local).Add(-time.Minute).Truncate(time.Minute)
-	start := end.Add(-time.Duration(minutes) * time.Minute)
-	return fmt.Sprintf(`{"startedAt":%q,"endedAt":%q,"durationMinutes":%d,"notes":"Practice","tags":["API"]}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339), minutes)
+func finishServerTimerForGoal(t *testing.T, router http.Handler, cookie *http.Cookie, goalID int, minutes int) (*httptest.ResponseRecorder, Session) {
+	t.Helper()
+
+	start := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", goalID), `{}`, cookie)
+	if start.Code != http.StatusCreated {
+		t.Fatalf("start timer status = %d, body = %s", start.Code, start.Body.String())
+	}
+	if _, err := db.Exec(`
+		UPDATE active_timers
+		SET state = 'paused', accumulated_seconds = ?
+		WHERE goal_id = ?
+	`, float64(minutes*60), goalID); err != nil {
+		t.Fatal(err)
+	}
+
+	response := apiRequest(t, router, http.MethodPost, fmt.Sprintf("/goals/%d/timer/finish", goalID),
+		`{"notes":"Practice","tags":["API"]}`, cookie)
+	if response.Code != http.StatusCreated && response.Code != http.StatusOK {
+		t.Fatalf("finish timer status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var session Session
+	decodeResponse(t, response, &session)
+	return response, session
 }
 
 func decodeResponse(t *testing.T, response *httptest.ResponseRecorder, target any) {

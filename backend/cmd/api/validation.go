@@ -97,26 +97,6 @@ func validateWeekdays(weekdays []int) bool {
 	return true
 }
 
-func validateSessionInput(request *CreateSessionRequest) string {
-	request.Notes = strings.TrimSpace(request.Notes)
-	request.Tags = cleanTags(request.Tags)
-	if request.DurationMinutes <= 0 || request.DurationMinutes > maxDailyMinutes {
-		return "durationMinutes must be between 1 and 1440"
-	}
-	startedAt, startErr := time.Parse(time.RFC3339Nano, request.StartedAt)
-	endedAt, endErr := time.Parse(time.RFC3339Nano, request.EndedAt)
-	if startErr != nil || endErr != nil {
-		return "startedAt and endedAt must use RFC3339"
-	}
-	if endedAt.Before(startedAt) {
-		return "endedAt must not be before startedAt"
-	}
-	if endedAt.After(time.Now().Add(5 * time.Minute)) {
-		return "endedAt must not be in the future"
-	}
-	return validateSessionContent(request.Notes, request.Tags)
-}
-
 func validateSessionContent(notes string, tags []string) string {
 	if !validTextLength(notes, maxNotesLength) {
 		return "notes must not exceed 4000 characters"

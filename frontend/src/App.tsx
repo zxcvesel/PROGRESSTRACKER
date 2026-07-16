@@ -6,9 +6,12 @@ import { ActivityCalendar } from './components/ActivityCalendar'
 import { StatsScreen } from './components/StatsScreen'
 import { GoalForm } from './components/GoalForm'
 import { GoalsScreen } from './components/GoalsScreen'
+import { HistorySection } from './components/HistorySection'
+import { readAPIError, requestAPI } from './api/client'
 
 type View = 'goals' | 'create' | 'stats'
 type SessionState = 'idle' | 'running' | 'paused'
+type ServerTimerState = 'running' | 'paused' | 'finished'
 type ThemeMode = 'dark' | 'light'
 type AccentColor = 'cyan' | 'purple' | 'orange' | 'green'
 type FontSize = 'compact' | 'default' | 'large'
@@ -98,17 +101,16 @@ type AuthUser = {
   email: string
   name: string
   createdAt: string
+  emailVerified: boolean
+  timezone: string
 }
 
 type AuthResponse = {
   user: AuthUser
+  developmentToken?: string
 }
 
-type ApiErrorResponse = {
-  error?: string
-}
-
-type AuthMode = 'login' | 'register'
+type AuthMode = 'login' | 'register' | 'forgot' | 'reset'
 
 type AuthForm = {
   email: string
@@ -136,14 +138,18 @@ type AppSettings = {
   notificationsEnabled: boolean
 }
 
-type PersistedTimerSession = {
-  userId: number
+type ActiveTimer = {
   goalId: number
-  state: Exclude<SessionState, 'idle'>
+  state: ServerTimerState
   startedAt: string
   elapsedSeconds: number
-  timerSpeed: number
-  savedAt: number
+  targetSeconds: number
+  speedMultiplier: number
+}
+
+type TimerStatusResponse = {
+  active: boolean
+  timer?: ActiveTimer
 }
 
 const defaultStats: AppStats = {
@@ -167,10 +173,8 @@ const defaultStats: AppStats = {
   goalTitle: '',
 }
 
-const markerColors = ['#19f7e8', '#ff7a3d', '#e6d37a', '#b45cff', '#58d8ff']
 const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 const settingsStorageKey = 'progress-tracker-settings'
-const timerStorageKey = 'progress-tracker-active-session'
 const reminderStorageKey = 'progress-tracker-last-reminder'
 const defaultSettings: AppSettings = {
   theme: 'dark',
@@ -214,6 +218,18 @@ const translations = {
     showPassword: 'Show password',
     hidePassword: 'Hide password',
     noAccount: 'No account yet?',
+    forgotPassword: 'Forgot password?',
+    forgotPasswordTitle: 'Restore access',
+    resetPasswordTitle: 'Set a new password',
+    sendResetLink: 'Send reset link',
+    resetPassword: 'Save new password',
+    backToSignIn: 'Back to sign in',
+    resetEmailSent: 'If this account exists, a reset link has been sent.',
+    passwordResetDone: 'Password updated. Sign in with your new password.',
+    verifyEmailTitle: 'Verify your email',
+    verifyEmailText: 'Open the verification link sent to your email before using your goals.',
+    resendVerification: 'Send verification again',
+    verificationSent: 'Verification email sent.',
     haveAccount: 'Already have an account?',
     authError: 'Could not complete authentication',
     account: 'Account',
@@ -226,6 +242,17 @@ const translations = {
     passwordChanged: 'Password changed',
     passwordChangeError: 'Could not change password',
     logout: 'Log out',
+    logoutAll: 'Log out on all devices',
+    logoutAllConfirm: 'Log out on all devices?',
+    deleteAccount: 'Delete account',
+    deleteAccountHint: 'This permanently removes your goals, sessions, and account data.',
+    deleteAccountConfirm: 'Enter your current password to permanently delete the account.',
+    deleteAccountAction: 'Delete permanently',
+    accountDeleted: 'Account deleted',
+    exportData: 'Export data',
+    exportJSON: 'Download JSON',
+    exportCSV: 'Download CSV',
+    exportError: 'Could not export data',
     logoutError: 'Could not log out',
     loadingGoals: 'Loading goals...',
     emptyGoalTitle: 'Create your first goal',
@@ -247,6 +274,16 @@ const translations = {
     dailyTargetHours: 'Daily target hours',
     minutes: 'Minutes',
     createHint: 'The goal starts today automatically. Streaks are counted daily.',
+    templates: 'Quick templates',
+    templateCoding: 'Coding',
+    templateLanguage: 'Language',
+    templateFitness: 'Fitness',
+    templateCodingTitle: 'Learn programming',
+    templateCodingDescription: 'Practice concepts and build a small project every day.',
+    templateLanguageTitle: 'Learn a language',
+    templateLanguageDescription: 'Study vocabulary, listening, and speaking every day.',
+    templateFitnessTitle: 'Daily training',
+    templateFitnessDescription: 'Follow a consistent training routine and record each session.',
     editGoal: 'Edit goal',
     adjustTarget: 'adjust target',
     cancel: 'Cancel',
@@ -280,6 +317,8 @@ const translations = {
     actualVsTarget: 'actual vs target',
     month: 'Month',
     emptyDistribution: 'Distribution will appear after your first session.',
+    emptyStatsTitle: 'No progress data yet',
+    emptyStatsText: 'Create a goal and complete your first timed session to unlock statistics.',
     allGoals: 'All goals',
     selectedGoal: 'Selected goal',
     calendar: 'Calendar',
@@ -301,6 +340,8 @@ const translations = {
     history: 'History',
     recent: 'recent',
     emptyHistory: 'No sessions yet. Start the timer and save your result.',
+    historySearch: 'Search notes or tags',
+    noHistoryResults: 'No sessions match this search.',
     edit: 'Edit',
     delete: 'Delete',
     save: 'Save',
@@ -346,7 +387,7 @@ const translations = {
     activeSessionOtherGoal: 'Finish or discard the active session before opening another goal.',
     legal: 'Legal',
     privacyPolicy: 'Privacy Policy',
-    privacyText: 'Progress Tracker stores your account details, goals, sessions, notes, tags, and progress to provide the service. Your learning data is separated by account and is not sold or used for advertising. You can stop using the service at any time; account deletion and data export will be added before public release.',
+    privacyText: 'Progress Tracker stores your account details, goals, sessions, notes, tags, and progress to provide the service. Your learning data is separated by account and is not sold or used for advertising. You can export your data or permanently delete the account.',
     termsOfUse: 'Terms of Use',
     termsText: 'Progress Tracker is a personal productivity tool. You are responsible for the information you save and for keeping access to your account secure. The service is provided without guarantees of uninterrupted availability while it remains in beta.',
     overview: 'Overview',
@@ -394,6 +435,18 @@ const translations = {
     showPassword: 'Показать пароль',
     hidePassword: 'Скрыть пароль',
     noAccount: 'Еще нет аккаунта?',
+    forgotPassword: 'Забыли пароль?',
+    forgotPasswordTitle: 'Восстановление доступа',
+    resetPasswordTitle: 'Новый пароль',
+    sendResetLink: 'Отправить ссылку',
+    resetPassword: 'Сохранить новый пароль',
+    backToSignIn: 'Вернуться ко входу',
+    resetEmailSent: 'Если аккаунт существует, ссылка для восстановления отправлена.',
+    passwordResetDone: 'Пароль обновлен. Войдите с новым паролем.',
+    verifyEmailTitle: 'Подтвердите email',
+    verifyEmailText: 'Откройте ссылку из письма, прежде чем пользоваться целями.',
+    resendVerification: 'Отправить письмо повторно',
+    verificationSent: 'Письмо с подтверждением отправлено.',
     haveAccount: 'Уже есть аккаунт?',
     authError: 'Не удалось выполнить вход',
     account: 'Аккаунт',
@@ -406,6 +459,17 @@ const translations = {
     passwordChanged: 'Пароль изменен',
     passwordChangeError: 'Не удалось сменить пароль',
     logout: 'Выйти',
+    logoutAll: 'Выйти на всех устройствах',
+    logoutAllConfirm: 'Выйти из аккаунта на всех устройствах?',
+    deleteAccount: 'Удалить аккаунт',
+    deleteAccountHint: 'Цели, сессии и данные аккаунта будут удалены безвозвратно.',
+    deleteAccountConfirm: 'Введите текущий пароль, чтобы навсегда удалить аккаунт.',
+    deleteAccountAction: 'Удалить навсегда',
+    accountDeleted: 'Аккаунт удален',
+    exportData: 'Экспорт данных',
+    exportJSON: 'Скачать JSON',
+    exportCSV: 'Скачать CSV',
+    exportError: 'Не удалось экспортировать данные',
     logoutError: 'Не удалось выйти',
     loadingGoals: 'Загрузка целей...',
     emptyGoalTitle: 'Создайте первую цель',
@@ -427,6 +491,16 @@ const translations = {
     dailyTargetHours: 'Дневная норма, часы',
     minutes: 'Минуты',
     createHint: 'Цель начинается сегодня автоматически. Серия считается по дням.',
+    templates: 'Быстрые шаблоны',
+    templateCoding: 'Кодинг',
+    templateLanguage: 'Язык',
+    templateFitness: 'Тренировки',
+    templateCodingTitle: 'Изучить программирование',
+    templateCodingDescription: 'Ежедневно изучать концепции и развивать небольшой проект.',
+    templateLanguageTitle: 'Изучить язык',
+    templateLanguageDescription: 'Ежедневно заниматься словарём, аудированием и разговорной практикой.',
+    templateFitnessTitle: 'Ежедневные тренировки',
+    templateFitnessDescription: 'Соблюдать регулярный план и отмечать каждую тренировку.',
     editGoal: 'Редактировать цель',
     adjustTarget: 'изменить цель',
     cancel: 'Отмена',
@@ -460,6 +534,8 @@ const translations = {
     actualVsTarget: 'факт против нормы',
     month: 'Месяц',
     emptyDistribution: 'Распределение появится после первой сессии.',
+    emptyStatsTitle: 'Данных о прогрессе пока нет',
+    emptyStatsText: 'Создайте цель и завершите первую сессию по таймеру, чтобы появилась статистика.',
     allGoals: 'Все цели',
     selectedGoal: 'Выбранная цель',
     calendar: 'Календарь',
@@ -481,6 +557,8 @@ const translations = {
     history: 'История',
     recent: 'последних',
     emptyHistory: 'Сессий пока нет. Запустите таймер и сохраните результат.',
+    historySearch: 'Поиск по заметкам или тегам',
+    noHistoryResults: 'Подходящие сессии не найдены.',
     edit: 'Изменить',
     delete: 'Удалить',
     save: 'Сохранить',
@@ -526,7 +604,7 @@ const translations = {
     activeSessionOtherGoal: 'Завершите или отмените активную сессию перед открытием другой цели.',
     legal: 'Правовая информация',
     privacyPolicy: 'Политика конфиденциальности',
-    privacyText: 'Progress Tracker хранит данные аккаунта, цели, сессии, заметки, теги и прогресс для работы сервиса. Учебные данные разделены по аккаунтам, не продаются и не используются для рекламы. Вы можете прекратить использование сервиса в любое время; удаление аккаунта и экспорт данных будут добавлены до публичного выпуска.',
+    privacyText: 'Progress Tracker хранит данные аккаунта, цели, сессии, заметки, теги и прогресс для работы сервиса. Учебные данные разделены по аккаунтам, не продаются и не используются для рекламы. Данные можно экспортировать, а аккаунт удалить безвозвратно.',
     termsOfUse: 'Условия использования',
     termsText: 'Progress Tracker — персональный инструмент продуктивности. Вы отвечаете за сохранённую информацию и безопасность доступа к аккаунту. Пока приложение находится в бета-версии, сервис предоставляется без гарантии непрерывной доступности.',
     overview: 'Обзор',
@@ -557,9 +635,16 @@ function App() {
   const copy = translations[settings.language]
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
-  const [authMode, setAuthMode] = useState<AuthMode>('login')
+  const [authMode, setAuthMode] = useState<AuthMode>(() => (
+    new URLSearchParams(window.location.search).has('resetToken') ? 'reset' : 'login'
+  ))
   const [authForm, setAuthForm] = useState<AuthForm>({ email: '', name: '', password: '', confirmPassword: '' })
   const [authError, setAuthError] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [passwordResetToken, setPasswordResetToken] = useState(
+    () => new URLSearchParams(window.location.search).get('resetToken') ?? '',
+  )
+  const [verificationMessage, setVerificationMessage] = useState('')
   const [accountName, setAccountName] = useState('')
   const [passwordForm, setPasswordForm] = useState<PasswordForm>({
     currentPassword: '',
@@ -580,8 +665,8 @@ function App() {
 
   const [sessionState, setSessionState] = useState<SessionState>('idle')
   const [sessionGoalId, setSessionGoalId] = useState<number | null>(null)
-  const [sessionStartedAt, setSessionStartedAt] = useState('')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [timerTargetSeconds, setTimerTargetSeconds] = useState(0)
   const [timerSpeed, setTimerSpeed] = useState(1)
   const [finishModalOpen, setFinishModalOpen] = useState(false)
   const [sessionNotes, setSessionNotes] = useState('')
@@ -620,34 +705,55 @@ function App() {
       }
 
       try {
+        const verificationToken = new URLSearchParams(window.location.search).get('verifyToken')
+        if (verificationToken) {
+          await requestAPI('/api/auth/verify-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: verificationToken }),
+          })
+          window.history.replaceState({}, '', window.location.pathname)
+        }
+
         const accountResponse = await fetch('/api/me', { credentials: 'same-origin' })
         if (!accountResponse.ok) {
           throw new Error('No active session')
         }
 
-        const [user, goalsResponse, statsResponse] = await Promise.all([
-          accountResponse.json() as Promise<AuthUser>,
+        let user = (await accountResponse.json()) as AuthUser
+        const timezone = browserTimezone()
+        if (user.timezone !== timezone) {
+          const timezoneResponse = await requestAPI('/api/me/timezone', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timezone }),
+          })
+          if (timezoneResponse.ok) {
+            user = (await timezoneResponse.json()) as AuthUser
+          }
+        }
+
+        const [goalsResponse, statsResponse, timerResponse] = await Promise.all([
           fetch('/api/goals', { credentials: 'same-origin' }),
           fetch('/api/stats', { credentials: 'same-origin' }),
+          fetch('/api/timer', { credentials: 'same-origin' }),
         ])
 
-        if (!goalsResponse.ok || !statsResponse.ok) {
+        if (!goalsResponse.ok || !statsResponse.ok || !timerResponse.ok) {
           throw new Error('Failed to load account data')
         }
 
-        const [loadedGoals, loadedStats] = await Promise.all([
+        const [loadedGoals, loadedStats, timerStatus] = await Promise.all([
           goalsResponse.json() as Promise<GoalSummary[]>,
           statsResponse.json() as Promise<AppStats>,
+          timerResponse.json() as Promise<TimerStatusResponse>,
         ])
 
-        let restoredTimer: PersistedTimerSession | null = null
         let restoredDetail: GoalDetail | null = null
-        const savedTimer = loadPersistedTimer(user.id)
-        if (savedTimer && loadedGoals.some((goal) => goal.id === savedTimer.goalId)) {
-          const detailResponse = await fetch(`/api/goals/${savedTimer.goalId}`, { credentials: 'same-origin' })
+        if (timerStatus.active && timerStatus.timer && loadedGoals.some((goal) => goal.id === timerStatus.timer?.goalId)) {
+          const detailResponse = await fetch(`/api/goals/${timerStatus.timer.goalId}`, { credentials: 'same-origin' })
           if (detailResponse.ok) {
             restoredDetail = (await detailResponse.json()) as GoalDetail
-            restoredTimer = savedTimer
           }
         }
 
@@ -655,16 +761,15 @@ function App() {
           setCurrentUser(user)
           setGoals(loadedGoals)
           setStats(loadedStats)
-          if (restoredTimer && restoredDetail) {
-            const restored = restoreElapsedTimer(restoredTimer, restoredDetail)
-            setSelectedGoalId(restoredTimer.goalId)
+          if (timerStatus.active && timerStatus.timer && restoredDetail) {
+            setSelectedGoalId(timerStatus.timer.goalId)
             setGoalDetail(restoredDetail)
-            setSessionGoalId(restoredTimer.goalId)
-            setSessionStartedAt(restoredTimer.startedAt)
-            setElapsedSeconds(restored.elapsedSeconds)
-            setTimerSpeed(restoredTimer.timerSpeed)
-            setSessionState(restored.state)
-            setFinishModalOpen(restored.reachedTarget)
+            setSessionGoalId(timerStatus.timer.goalId)
+            setElapsedSeconds(timerStatus.timer.elapsedSeconds)
+            setTimerTargetSeconds(timerStatus.timer.targetSeconds)
+            setTimerSpeed(timerStatus.timer.speedMultiplier)
+            setSessionState(timerStatus.timer.state === 'running' ? 'running' : 'paused')
+            setFinishModalOpen(timerStatus.timer.state === 'finished')
           }
         }
       } catch {
@@ -697,23 +802,6 @@ function App() {
   useEffect(() => {
     setAccountName(currentUser?.name || '')
   }, [currentUser])
-
-  useEffect(() => {
-    if (!currentUser || !sessionGoalId || sessionState === 'idle') {
-      return
-    }
-
-    const persisted: PersistedTimerSession = {
-      userId: currentUser.id,
-      goalId: sessionGoalId,
-      state: sessionState,
-      startedAt: sessionStartedAt,
-      elapsedSeconds,
-      timerSpeed,
-      savedAt: Date.now(),
-    }
-    window.localStorage.setItem(timerStorageKey, JSON.stringify(persisted))
-  }, [currentUser, elapsedSeconds, sessionGoalId, sessionStartedAt, sessionState, timerSpeed])
 
   useEffect(() => {
     if (!currentUser || !settings.notificationsEnabled || notificationPermission !== 'granted') {
@@ -754,17 +842,16 @@ function App() {
 
     const timer = window.setInterval(() => {
       setElapsedSeconds((current) => {
-        const targetSeconds = Math.max((goalDetail.dailyTargetMinutes - goalDetail.todayMinutes) * 60, 0)
         const next = current + timerSpeed
 
-        if (targetSeconds > 0 && next >= targetSeconds) {
+        if (timerTargetSeconds > 0 && next >= timerTargetSeconds) {
           window.clearInterval(timer)
           setSessionState('paused')
           setFinishModalOpen(true)
           if (settings.notificationsEnabled && notificationPermission === 'granted') {
             showBrowserNotification(copy.targetReachedNotification, goalDetail.title)
           }
-          return targetSeconds
+          return timerTargetSeconds
         }
 
         return next
@@ -772,7 +859,21 @@ function App() {
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [copy.targetReachedNotification, goalDetail, notificationPermission, sessionState, settings.notificationsEnabled, timerSpeed])
+  }, [copy.targetReachedNotification, goalDetail, notificationPermission, sessionState, settings.notificationsEnabled, timerSpeed, timerTargetSeconds])
+
+  useEffect(() => {
+    if (!currentUser || sessionState === 'idle') {
+      return
+    }
+
+    const sync = () => void syncActiveTimer()
+    const syncTimer = window.setInterval(sync, 10_000)
+    window.addEventListener('focus', sync)
+    return () => {
+      window.clearInterval(syncTimer)
+      window.removeEventListener('focus', sync)
+    }
+  }, [currentUser, sessionState])
 
   const screenTitle = useMemo(() => {
     if (!currentUser) {
@@ -795,26 +896,57 @@ function App() {
   }, [copy, currentUser, selectedGoalId, view])
 
   async function apiFetch(path: string, options: RequestInit = {}) {
-    const headers = new Headers(options.headers)
-
-    const response = await fetch(path, { ...options, credentials: 'same-origin', headers })
+    const response = await requestAPI(path, options)
     if (response.status === 401) {
       handleAuthReset()
     }
     return response
   }
 
+  async function syncUserTimezone(user: AuthUser) {
+    const timezone = browserTimezone()
+    if (user.timezone === timezone) {
+      return user
+    }
+    const response = await requestAPI('/api/me/timezone', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone }),
+    })
+    if (!response.ok) {
+      return user
+    }
+    return (await response.json()) as AuthUser
+  }
+
   async function readApiError(response: Response, fallback: string) {
+    return readAPIError(response, fallback)
+  }
+
+  async function syncActiveTimer() {
     try {
-      const data = (await response.clone().json()) as ApiErrorResponse
-      if (typeof data.error === 'string' && data.error.trim() !== '') {
-        return `${fallback}: ${data.error}`
+      const response = await apiFetch('/api/timer')
+      if (!response.ok) {
+        return
+      }
+      const status = (await response.json()) as TimerStatusResponse
+      if (!status.active || !status.timer) {
+        resetSession()
+        return
+      }
+
+      const timer = status.timer
+      setSessionGoalId(timer.goalId)
+      setElapsedSeconds(timer.elapsedSeconds)
+      setTimerTargetSeconds(timer.targetSeconds)
+      setTimerSpeed(timer.speedMultiplier)
+      setSessionState(timer.state === 'running' ? 'running' : 'paused')
+      if (timer.state === 'finished') {
+        setFinishModalOpen(true)
       }
     } catch {
-      // Some failed requests may not have a JSON body, for example network/proxy errors.
+      // Keep the local display running and retry on the next synchronization.
     }
-
-    return fallback
   }
 
   function handleAuthReset() {
@@ -834,8 +966,9 @@ function App() {
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAuthError('')
+    setAuthMessage('')
 
-    if (authMode === 'register') {
+    if (authMode === 'register' || authMode === 'reset') {
       if (authForm.password !== authForm.confirmPassword) {
         setAuthError(copy.passwordMismatch)
         return
@@ -847,17 +980,59 @@ function App() {
     }
 
     try {
+      if (authMode === 'forgot') {
+        const response = await requestAPI('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authForm.email }),
+        })
+        if (!response.ok) {
+          setAuthError(await readApiError(response, copy.authError))
+          return
+        }
+        const data = (await response.json()) as { developmentToken?: string }
+        setAuthMessage(copy.resetEmailSent)
+        if (data.developmentToken) {
+          setPasswordResetToken(data.developmentToken)
+          setAuthMode('reset')
+        }
+        return
+      }
+
+      if (authMode === 'reset') {
+        if (!passwordResetToken) {
+          setAuthError(copy.authError)
+          return
+        }
+        const response = await requestAPI('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: passwordResetToken, newPassword: authForm.password }),
+        })
+        if (!response.ok) {
+          setAuthError(await readApiError(response, copy.authError))
+          return
+        }
+        setPasswordResetToken('')
+        setAuthForm({ email: authForm.email, name: '', password: '', confirmPassword: '' })
+        setAuthMode('login')
+        setAuthMessage(copy.passwordResetDone)
+        window.history.replaceState({}, '', window.location.pathname)
+        return
+      }
+
       const response = await fetch(`/api/auth/${authMode === 'login' ? 'login' : 'register'}`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          email: authForm.email,
-          name: authForm.name,
-          password: authForm.password,
-        }),
+          body: JSON.stringify({
+            email: authForm.email,
+            name: authForm.name,
+            password: authForm.password,
+            timezone: browserTimezone(),
+          }),
       })
 
       if (!response.ok) {
@@ -865,8 +1040,19 @@ function App() {
         return
       }
 
-      const data = (await response.json()) as AuthResponse
-      setCurrentUser(data.user)
+      let data = (await response.json()) as AuthResponse
+      if (authMode === 'register' && data.developmentToken) {
+        const verifyResponse = await requestAPI('/api/auth/verify-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: data.developmentToken }),
+        })
+        if (verifyResponse.ok) {
+          data = (await verifyResponse.json()) as AuthResponse
+        }
+      }
+      const syncedUser = await syncUserTimezone(data.user)
+      setCurrentUser(syncedUser)
       setAuthForm({ email: '', name: '', password: '', confirmPassword: '' })
       setSelectedGoalId(null)
       setSelectedStatsGoalId(0)
@@ -886,6 +1072,68 @@ function App() {
     } finally {
       handleAuthReset()
     }
+  }
+
+  async function handleLogoutAll() {
+    if (!window.confirm(copy.logoutAllConfirm)) {
+      return
+    }
+    try {
+      const response = await apiFetch('/api/me/sessions', { method: 'DELETE' })
+      if (!response.ok) {
+        setAccountError(await readApiError(response, copy.logoutError))
+        return
+      }
+      handleAuthReset()
+    } catch {
+      setAccountError(copy.logoutError)
+    }
+  }
+
+  async function handleDeleteAccount(password: string) {
+    setAccountMessage('')
+    setAccountError('')
+    const response = await apiFetch('/api/me', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    if (!response.ok) {
+      setAccountError(await readApiError(response, copy.deleteAccount))
+      return false
+    }
+    handleAuthReset()
+    setAuthMessage(copy.accountDeleted)
+    return true
+  }
+
+  async function exportAccount(format: 'json' | 'csv') {
+    setAccountError('')
+    try {
+      const response = await apiFetch(`/api/me/export?format=${format}`)
+      if (!response.ok) {
+        setAccountError(await readApiError(response, copy.exportError))
+        return
+      }
+      const blob = await response.blob()
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = format === 'csv' ? 'progress-tracker-sessions.csv' : 'progress-tracker-export.json'
+      link.click()
+      URL.revokeObjectURL(link.href)
+    } catch {
+      setAccountError(copy.exportError)
+    }
+  }
+
+  async function resendVerification() {
+    setVerificationMessage('')
+    const response = await apiFetch('/api/auth/resend-verification', { method: 'POST' })
+    if (!response.ok) {
+      setVerificationMessage(await readApiError(response, copy.authError))
+      return
+    }
+    setVerificationMessage(copy.verificationSent)
   }
 
   async function updateProfile(event: FormEvent<HTMLFormElement>) {
@@ -1039,7 +1287,7 @@ function App() {
     }
   }
 
-  function startSession() {
+  async function startSession() {
     if (!goalDetail) {
       return
     }
@@ -1049,22 +1297,60 @@ function App() {
       return
     }
 
-    setSessionStartedAt(toLocalISOString(new Date()))
-    setSessionGoalId(goalDetail.id)
-    setElapsedSeconds(0)
-    setSessionState('running')
+    try {
+      const response = await apiFetch(`/api/goals/${goalDetail.id}/timer/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ speedMultiplier: timerSpeed }),
+      })
+      if (!response.ok) {
+        setFormError(await readApiError(response, copy.saveSessionError))
+        return
+      }
+      const timer = (await response.json()) as ActiveTimer
+      setSessionGoalId(timer.goalId)
+      setElapsedSeconds(timer.elapsedSeconds)
+      setTimerTargetSeconds(timer.targetSeconds)
+      setTimerSpeed(timer.speedMultiplier)
+      setSessionState('running')
+      setFormError('')
+    } catch {
+      setFormError(copy.saveSessionError)
+    }
   }
 
-  function pauseSession() {
+  async function pauseSession() {
+    if (!sessionGoalId) {
+      return
+    }
+    const response = await apiFetch(`/api/goals/${sessionGoalId}/timer/pause`, { method: 'POST' })
+    if (!response.ok) {
+      setFormError(await readApiError(response, copy.saveSessionError))
+      return
+    }
+    const timer = (await response.json()) as ActiveTimer
+    setElapsedSeconds(timer.elapsedSeconds)
     setSessionState('paused')
   }
 
-  function resumeSession() {
-    setSessionState('running')
+  async function resumeSession() {
+    if (!sessionGoalId) {
+      return
+    }
+    const response = await apiFetch(`/api/goals/${sessionGoalId}/timer/resume`, { method: 'POST' })
+    if (!response.ok) {
+      setFormError(await readApiError(response, copy.saveSessionError))
+      return
+    }
+    const timer = (await response.json()) as ActiveTimer
+    setElapsedSeconds(timer.elapsedSeconds)
+    setSessionState(timer.state === 'running' ? 'running' : 'paused')
   }
 
-  function finishSession() {
-    setSessionState('paused')
+  async function finishSession() {
+    if (sessionState === 'running') {
+      await pauseSession()
+    }
     setFinishModalOpen(true)
   }
 
@@ -1073,15 +1359,12 @@ function App() {
       return
     }
 
-    const response = await apiFetch(`/api/goals/${goalDetail.id}/sessions`, {
+    const response = await apiFetch(`/api/goals/${goalDetail.id}/timer/finish`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        startedAt: sessionStartedAt || toLocalISOString(new Date()),
-        endedAt: toLocalISOString(new Date()),
-        durationMinutes: Math.max(1, Math.ceil(elapsedSeconds / 60)),
         notes: sessionNotes,
         tags: sessionTags
           .split(',')
@@ -1246,19 +1529,18 @@ function App() {
   function resetSession() {
     setSessionState('idle')
     setElapsedSeconds(0)
-    setSessionStartedAt('')
     setSessionGoalId(null)
+    setTimerTargetSeconds(0)
     setFinishModalOpen(false)
     setSessionNotes('')
     setSessionTags('')
     setFormError('')
     setTimerSpeed(1)
-    window.localStorage.removeItem(timerStorageKey)
   }
 
   function leaveGoalView() {
     if (sessionState === 'running') {
-      setSessionState('paused')
+      void pauseSession()
     }
     setSelectedGoalId(null)
     setGoalDetail(null)
@@ -1341,17 +1623,32 @@ function App() {
               mode={authMode}
               form={authForm}
               error={authError}
+              message={authMessage}
               copy={copy}
               onModeChange={(mode) => {
                 setAuthMode(mode)
                 setAuthError('')
+                setAuthMessage('')
               }}
               onChange={setAuthForm}
               onSubmit={handleAuthSubmit}
             />
           )}
 
-          {currentUser && (
+          {currentUser && !currentUser.emailVerified && (
+            <section className="empty-state">
+              <div className="flame-orb" aria-hidden="true"><FlameIcon /></div>
+              <h1>{copy.verifyEmailTitle}</h1>
+              <p>{copy.verifyEmailText}</p>
+              {verificationMessage && <p className="settings-success">{verificationMessage}</p>}
+              <button className="primary-button" type="button" onClick={() => void resendVerification()}>
+                {copy.resendVerification}
+              </button>
+              <button className="ghost-button" type="button" onClick={() => void handleLogout()}>{copy.logout}</button>
+            </section>
+          )}
+
+          {currentUser && currentUser.emailVerified && (
             <>
               {view === 'goals' && !selectedGoalId && (
                 <GoalsScreen
@@ -1371,16 +1668,20 @@ function App() {
                   goal={goalDetail}
                   copy={copy}
                   language={settings.language}
-                  elapsedSeconds={elapsedSeconds}
+                  elapsedSeconds={sessionGoalId === goalDetail.id ? elapsedSeconds : 0}
                   timerSpeed={timerSpeed}
                   isEditingGoal={isEditingGoal}
                   editGoalForm={editGoalForm}
                   formError={formError}
-                  sessionState={sessionState}
+                  sessionState={sessionGoalId === goalDetail.id ? sessionState : 'idle'}
                   editingSessionId={editingSessionId}
                   sessionEditNotes={sessionEditNotes}
                   sessionEditTags={sessionEditTags}
-                  onTimerSpeedChange={setTimerSpeed}
+                  onTimerSpeedChange={(speed) => {
+                    if (sessionState === 'idle') {
+                      setTimerSpeed(speed)
+                    }
+                  }}
                   onEditGoalChange={setEditGoalForm}
                   onEditGoalSubmit={updateGoal}
                   onEditGoalStart={startEditGoal}
@@ -1430,7 +1731,7 @@ function App() {
           )}
         </div>
 
-        {currentUser && <nav className="bottom-nav" aria-label={copy.mainNavigation}>
+        {currentUser?.emailVerified && <nav className="bottom-nav" aria-label={copy.mainNavigation}>
           <button
             className={view === 'goals' ? 'is-active' : ''}
             type="button"
@@ -1468,7 +1769,7 @@ function App() {
           </button>
         </nav>}
 
-        {currentUser && finishModalOpen && goalDetail && (
+        {currentUser?.emailVerified && finishModalOpen && goalDetail && sessionGoalId === goalDetail.id && (
           <FinishSessionModal
             goal={goalDetail}
             copy={copy}
@@ -1501,6 +1802,9 @@ function App() {
           onProfileSubmit={updateProfile}
           onPasswordSubmit={changePassword}
           onLogout={handleLogout}
+          onLogoutAll={() => void handleLogoutAll()}
+          onDeleteAccount={handleDeleteAccount}
+          onExport={(format) => void exportAccount(format)}
           onToggleNotifications={toggleNotifications}
         />
       </section>
@@ -1675,6 +1979,7 @@ function GoalDetailsScreen({
                 className={timerSpeed === speed ? 'is-selected' : ''}
                 type="button"
                 key={speed}
+                disabled={sessionState !== 'idle'}
                 onClick={() => onTimerSpeedChange(speed)}
               >
                 {speed}x
@@ -1800,97 +2105,6 @@ function FinishSessionModal({
   )
 }
 
-function HistorySection({
-  sessions,
-  copy,
-  language,
-  editingSessionId,
-  editNotes,
-  editTags,
-  onEditStart,
-  onEditCancel,
-  onEditSave,
-  onDelete,
-  onNotesChange,
-  onTagsChange,
-}: {
-  sessions: Session[]
-  copy: Copy
-  language: AppLanguage
-  editingSessionId: number | null
-  editNotes: string
-  editTags: string
-  onEditStart: (session: Session) => void
-  onEditCancel: () => void
-  onEditSave: (sessionId: number) => void
-  onDelete: (session: Session) => void
-  onNotesChange: (value: string) => void
-  onTagsChange: (value: string) => void
-}) {
-  return (
-    <section className="entries-section">
-      <div className="section-heading">
-        <h2>{copy.history}</h2>
-        <span>{sessions.length} {copy.recent}</span>
-      </div>
-      {sessions.length === 0 && (
-        <p className="empty-message">{copy.emptyHistory}</p>
-      )}
-      {sessions.map((session, index) => (
-        <article className="history-card" key={session.id}>
-          <span
-            className="entry-marker"
-            style={{ backgroundColor: markerColors[index % markerColors.length] }}
-          />
-          <div>
-            <p>{formatSessionDate(session.endedAt, language)}</p>
-            <strong>{formatMinutes(session.durationMinutes)}</strong>
-            {editingSessionId === session.id ? (
-              <div className="history-edit-form">
-                <label>
-                  {copy.notes}
-                  <textarea
-                    value={editNotes}
-                    onChange={(event) => onNotesChange(event.target.value)}
-                    rows={3}
-                  />
-                </label>
-                <label>
-                  {copy.tags}
-                  <input
-                    value={editTags}
-                    onChange={(event) => onTagsChange(event.target.value)}
-                    placeholder={copy.tagsPlaceholder}
-                  />
-                </label>
-                <div className="history-actions">
-                  <button type="button" onClick={onEditCancel}>{copy.cancel}</button>
-                  <button className="history-action--primary" type="button" onClick={() => onEditSave(session.id)}>{copy.save}</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {session.notes && <span>{session.notes}</span>}
-                {session.tags.length > 0 && (
-                  <div className="tag-row">
-                    {session.tags.map((tag) => (
-                      <small key={tag}>{tag}</small>
-                    ))}
-                  </div>
-                )}
-                <div className="history-actions">
-                  <button type="button" onClick={() => onEditStart(session)}>{copy.edit}</button>
-                  <button className="history-action--danger" type="button" onClick={() => onDelete(session)}>{copy.delete}</button>
-                </div>
-              </>
-            )}
-          </div>
-        </article>
-      ))}
-    </section>
-  )
-}
-
 function ProgressBar({ value }: { value: number }) {
   return (
     <span className="bar-track">
@@ -1981,76 +2195,12 @@ function statusLabel(status: GoalSummary['status'], copy: Copy) {
   return copy.statusActive
 }
 
-function localeFor(language: AppLanguage) {
-  return language === 'ru' ? 'ru-RU' : 'en-US'
-}
-
-function formatSessionDate(value: string, language: AppLanguage) {
-  return new Intl.DateTimeFormat(localeFor(language), {
-    month: 'long',
-    day: 'numeric',
-  }).format(new Date(value))
-}
-
-function toLocalISOString(date: Date) {
-  const timezoneOffset = -date.getTimezoneOffset()
-  const sign = timezoneOffset >= 0 ? '+' : '-'
-  const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60)
-  const offsetMinutes = Math.abs(timezoneOffset) % 60
-  const localDate = new Date(date.getTime() + timezoneOffset * 60 * 1000)
-
-  return `${localDate.toISOString().slice(0, 19)}${sign}${String(offsetHours).padStart(2, '0')}:${String(offsetMinutes).padStart(2, '0')}`
-}
-
 function percent(value: number, total: number) {
   if (total <= 0) {
     return 0
   }
 
   return Math.min(Math.round((value / total) * 100), 100)
-}
-
-function loadPersistedTimer(userId: number): PersistedTimerSession | null {
-  try {
-    const rawValue = window.localStorage.getItem(timerStorageKey)
-    if (!rawValue) {
-      return null
-    }
-
-    const value = JSON.parse(rawValue) as Partial<PersistedTimerSession>
-    const isValid = value.userId === userId
-      && typeof value.goalId === 'number'
-      && (value.state === 'running' || value.state === 'paused')
-      && typeof value.startedAt === 'string'
-      && typeof value.elapsedSeconds === 'number'
-      && typeof value.timerSpeed === 'number'
-      && typeof value.savedAt === 'number'
-
-    if (!isValid) {
-      window.localStorage.removeItem(timerStorageKey)
-      return null
-    }
-
-    return value as PersistedTimerSession
-  } catch {
-    window.localStorage.removeItem(timerStorageKey)
-    return null
-  }
-}
-
-function restoreElapsedTimer(timer: PersistedTimerSession, goal: GoalDetail) {
-  const elapsedWhileClosed = timer.state === 'running'
-    ? Math.max((Date.now() - timer.savedAt) / 1000, 0) * timer.timerSpeed
-    : 0
-  const targetSeconds = Math.max((goal.dailyTargetMinutes - goal.todayMinutes) * 60, 0)
-  const restoredSeconds = timer.elapsedSeconds + elapsedWhileClosed
-  const reachedTarget = targetSeconds > 0 && restoredSeconds >= targetSeconds
-
-  return {
-    elapsedSeconds: reachedTarget ? targetSeconds : restoredSeconds,
-    state: reachedTarget ? 'paused' as const : timer.state,
-    reachedTarget,
-  }
 }
 
 function localDateString(date: Date) {
@@ -2076,6 +2226,10 @@ function isStrongPassword(password: string) {
     && /[A-Z]/.test(password)
     && /\d/.test(password)
     && /[^A-Za-z0-9]/.test(password)
+}
+
+function browserTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
 function FlameIcon() {

@@ -937,6 +937,26 @@
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
 }
 
+.history-search {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 0 12px;
+  background: var(--field-bg);
+  color: var(--text-strong);
+  font: inherit;
+}
+
+.history-search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.stats-empty-state {
+  min-height: 360px;
+}
+
 .primary-button {
   width: 100%;
   min-height: 45px;
@@ -1298,6 +1318,33 @@
 .chart-caption {
   color: var(--muted);
   font-size: 13px;
+}
+
+.goal-templates {
+  display: grid;
+  gap: 8px;
+}
+
+.goal-templates > span {
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.goal-templates > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.goal-templates button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: var(--text-strong);
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 700;
 }
 
 .today-progress {
@@ -1899,8 +1946,24 @@
   transform: rotate(225deg);
 }
 
+.settings-details--danger {
+  border-color: rgba(255, 92, 111, 0.3);
+}
+
+.settings-details--danger summary,
+.settings-details--danger .danger-button {
+  color: #ff7486;
+}
+
 .settings-details .settings-form,
 .legal-details p {
+  margin-top: 12px;
+}
+
+.settings-inline-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   margin-top: 12px;
 }
 

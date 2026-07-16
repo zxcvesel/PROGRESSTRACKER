@@ -22,6 +22,16 @@ type GoalFormCopy = {
   createGoal: string
   cancel: string
   saveChanges: string
+  templates: string
+  templateCoding: string
+  templateLanguage: string
+  templateFitness: string
+  templateCodingTitle: string
+  templateCodingDescription: string
+  templateLanguageTitle: string
+  templateLanguageDescription: string
+  templateFitnessTitle: string
+  templateFitnessDescription: string
 }
 
 type GoalFormProps = {
@@ -43,6 +53,35 @@ export function GoalForm({ mode, form, formError, copy, onChange, onSubmit, onCa
         <h2>{isEdit ? copy.editGoal : copy.createGoalTitle}</h2>
         <span>{isEdit ? copy.adjustTarget : copy.longTermFocus}</span>
       </div>
+
+      {!isEdit && (
+        <div className="goal-templates">
+          <span>{copy.templates}</span>
+          <div>
+            <button type="button" onClick={() => onChange({
+              title: copy.templateCodingTitle,
+              description: copy.templateCodingDescription,
+              totalDays: '90',
+              dailyTargetHours: '1',
+              dailyTargetMinutes: '0',
+            })}>{copy.templateCoding}</button>
+            <button type="button" onClick={() => onChange({
+              title: copy.templateLanguageTitle,
+              description: copy.templateLanguageDescription,
+              totalDays: '90',
+              dailyTargetHours: '0',
+              dailyTargetMinutes: '30',
+            })}>{copy.templateLanguage}</button>
+            <button type="button" onClick={() => onChange({
+              title: copy.templateFitnessTitle,
+              description: copy.templateFitnessDescription,
+              totalDays: '30',
+              dailyTargetHours: '0',
+              dailyTargetMinutes: '30',
+            })}>{copy.templateFitness}</button>
+          </div>
+        </div>
+      )}
 
       <label>
         {copy.title}

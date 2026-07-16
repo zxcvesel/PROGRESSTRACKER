@@ -6,7 +6,7 @@ import (
 )
 
 func goalsHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
+	user, ok := currentVerifiedUserFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -31,7 +31,7 @@ func goalsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func createGoalHandler(w http.ResponseWriter, r *http.Request) {
-	user, ok := currentUserFromRequest(w, r)
+	user, ok := currentVerifiedUserFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -55,7 +55,7 @@ func createGoalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if request.StartDate == "" {
-		request.StartDate = todayString()
+		request.StartDate = todayStringForUser(user.ID)
 	}
 	if _, err := time.Parse(time.DateOnly, request.StartDate); err != nil {
 		writeError(w, "startDate must use YYYY-MM-DD", http.StatusBadRequest)

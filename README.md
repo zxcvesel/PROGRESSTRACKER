@@ -2,120 +2,72 @@
 
 ## Overview
 
-Progress Tracker is a mobile-first web app for building consistent learning habits. Users create long-term goals, complete focused sessions, maintain daily streaks, and review progress through statistics, history, and a calendar.
+Progress Tracker is a mobile-first web app for building consistent learning habits. Users create long-term goals, complete timed daily sessions, maintain streaks, and review progress in history, statistics, and a calendar.
 
 Current version: **0.1.0 Beta**.
 
 ## Обзор
 
-Progress Tracker — мобильное веб-приложение для формирования стабильных учебных привычек. Пользователи создают долгосрочные цели, проводят сфокусированные сессии, поддерживают ежедневные серии и анализируют прогресс через статистику, историю и календарь.
+Progress Tracker — мобильное веб-приложение для формирования стабильных учебных привычек. Пользователи создают долгосрочные цели, выполняют ежедневные сессии по таймеру, поддерживают серии и анализируют историю, статистику и календарь.
 
 Текущая версия: **0.1.0 Beta**.
 
 ## Main Features
 
-- Account registration, sign-in, sign-out, profile name editing, and password change.
-- Private goals, sessions, history, calendar, and statistics for each account.
-- Long-term goals with total duration and a daily time target.
-- Session timer with pause, resume, automatic target completion, and recovery after page reload.
-- Session notes, tags, editing, deletion, and one combined daily result.
-- Daily and total progress, current and longest streaks, completion rates, weekly comparison, monthly totals, and goal distribution.
-- Dark and light themes, accent colors, font sizes, English and Russian interfaces.
-- Installable PWA foundation and optional browser notifications while the app is open.
+- Registration, email verification, sign-in, password recovery, global logout, and account deletion.
+- Private goals and server-managed timers with pause, resume, automatic completion, notes, and tags.
+- Daily and total progress, streaks, calendar, completion rates, weekly comparison, and monthly statistics.
+- Goal templates, session history search, JSON/CSV data export, themes, accent colors, font sizes, and English/Russian interfaces.
 
 ## Основные возможности
 
-- Регистрация, вход, выход, изменение имени профиля и смена пароля.
-- Личные цели, сессии, история, календарь и статистика для каждого аккаунта.
-- Долгосрочные цели с общей длительностью и ежедневной нормой времени.
-- Таймер с паузой, продолжением, автоматическим завершением нормы и восстановлением после перезагрузки страницы.
-- Заметки, теги, редактирование и удаление сессий с единым результатом за день.
-- Дневной и общий прогресс, текущая и лучшая серии, completion rate, сравнение недель, итог за месяц и распределение времени по целям.
-- Тёмная и светлая темы, цвета акцента, размеры шрифта, английский и русский интерфейсы.
-- Основа устанавливаемого PWA и необязательные браузерные уведомления при открытом приложении.
+- Регистрация, подтверждение email, вход, восстановление пароля, выход на всех устройствах и удаление аккаунта.
+- Личные цели и серверный таймер с паузой, продолжением, автоматическим завершением, заметками и тегами.
+- Дневной и общий прогресс, серии, календарь, процент выполнения, сравнение недель и месячная статистика.
+- Шаблоны целей, поиск по истории, экспорт JSON/CSV, темы, цвета акцента, размеры шрифта и интерфейс на английском/русском языках.
 
 ## Progress Rules
 
-- A day increases the streak only after its daily target is reached.
-- Partial practice is saved but does not increase the streak.
-- Additional practice on the same calendar day is merged into one daily session.
-- Missing a required calendar day resets the current streak.
-- Total goal progress is based on completed daily targets.
+- A streak grows only when the daily target is reached; partial practice is still saved.
+- Sessions from the same calendar day are merged into one daily result.
+- Missing a required day resets the current streak. Calendar days follow the account timezone detected from the browser.
 
 ## Правила прогресса
 
-- День увеличивает серию только после выполнения дневной нормы.
-- Частичная практика сохраняется, но не увеличивает серию.
-- Дополнительные занятия в тот же календарный день объединяются в одну дневную сессию.
-- Пропуск обязательного календарного дня сбрасывает текущую серию.
-- Общий прогресс цели считается по выполненным дневным нормам.
+- Серия растёт только после выполнения дневной нормы; частичный прогресс сохраняется.
+- Сессии одного календарного дня объединяются в единый дневной результат.
+- Пропуск обязательного дня сбрасывает серию. Календарный день определяется часовым поясом аккаунта, полученным из браузера.
 
 ## Technology
 
-- Backend: Go REST API.
-- Database: SQLite.
-- Frontend: React, TypeScript, and Vite.
-- Security: Argon2id password hashes, hashed session tokens, secure cookie options, Origin checks, bounded rate limiting, strict request validation, and hardened HTTP/SQLite defaults.
-- Tests: backend unit and HTTP integration tests; frontend lint and production build checks.
+- Go REST API, SQLite, React, TypeScript, and Vite.
+- Argon2id password hashing, hashed session/action tokens, secure cookie settings, Origin checks, rate limiting, strict validation, and account-level data isolation.
+- Go unit/integration tests, Vitest, Playwright, GitHub Actions, Docker Compose, Nginx, health/readiness checks, and structured request logs.
 
 ## Технологии
 
-- Backend: REST API на Go.
-- База данных: SQLite.
-- Frontend: React, TypeScript и Vite.
-- Безопасность: Argon2id-хэши паролей, хэши токенов сессий, защищенные настройки cookie, проверка Origin, ограничение запросов, строгая валидация и усиленные настройки HTTP/SQLite.
-- Тесты: модульные и HTTP-интеграционные тесты backend, lint и production build frontend.
+- REST API на Go, SQLite, React, TypeScript и Vite.
+- Argon2id-хеширование паролей, хешированные токены, защищённые cookie, проверка Origin, ограничение запросов, строгая валидация и изоляция данных аккаунтов.
+- Модульные и интеграционные Go-тесты, Vitest, Playwright, GitHub Actions, Docker Compose, Nginx, health/readiness-проверки и структурированные журналы запросов.
 
-## Local Addresses
+## Running
 
-- Backend: `http://127.0.0.1:8080`.
-- Frontend: `http://127.0.0.1:5173` or `http://localhost:5173`.
-- The Vite development server proxies frontend `/api` requests to the backend.
+- Local backend: `http://127.0.0.1:8080`.
+- Local frontend: `http://127.0.0.1:5173` or `http://localhost:5173`.
+- Docker Compose frontend: `http://127.0.0.1:8088`.
+- SQLite backups are created with the dedicated `backend/cmd/backup` command or the backup binary included in the backend image.
 
-## Production Configuration
+## Запуск
 
-- Use Go **1.25.12** or newer within the 1.25 release line.
-- Set `PROGRESS_TRACKER_HOST`, `PROGRESS_TRACKER_PORT`, and `PROGRESS_TRACKER_DB_PATH` for the deployment environment.
-- Set `PROGRESS_TRACKER_ALLOWED_ORIGINS` to the public frontend origin and enable `PROGRESS_TRACKER_SECURE_COOKIES=true` only behind HTTPS.
-- Enable `PROGRESS_TRACKER_TRUST_PROXY=true` only when requests pass through a trusted reverse proxy that overwrites forwarding headers.
-- GitHub Actions checks backend tests, formatting, vet, vulnerabilities, frontend lint, build, and dependency audit.
+- Локальный backend: `http://127.0.0.1:8080`.
+- Локальный frontend: `http://127.0.0.1:5173` или `http://localhost:5173`.
+- Frontend через Docker Compose: `http://127.0.0.1:8088`.
+- Резервные копии SQLite создаются командой `backend/cmd/backup` или отдельным backup-бинарником в backend-образе.
 
-## Конфигурация production
+## Production Notes
 
-- Используйте Go **1.25.12** или более новую версию линейки 1.25.
-- Задайте `PROGRESS_TRACKER_HOST`, `PROGRESS_TRACKER_PORT` и `PROGRESS_TRACKER_DB_PATH` для среды развертывания.
-- В `PROGRESS_TRACKER_ALLOWED_ORIGINS` укажите публичный адрес frontend, а `PROGRESS_TRACKER_SECURE_COOKIES=true` включайте только при работе через HTTPS.
-- Включайте `PROGRESS_TRACKER_TRUST_PROXY=true` только за доверенным reverse proxy, который перезаписывает forwarding-заголовки.
-- GitHub Actions проверяет тесты backend, форматирование, vet, уязвимости, lint и сборку frontend, а также зависимости.
+Production requires HTTPS, secure cookies, an explicit public origin, SMTP for account emails, persistent SQLite storage, and regular off-host backups. Temporary timer acceleration is available only in development. Background Web Push is not implemented yet.
 
-## Локальные адреса
+## Production-заметки
 
-- Backend: `http://127.0.0.1:8080`.
-- Frontend: `http://127.0.0.1:5173` или `http://localhost:5173`.
-- Vite development server перенаправляет frontend-запросы `/api` на backend.
-
-## Project Structure
-
-- `backend/cmd/api`: API routes, authentication, goals, sessions, statistics, security helpers, and tests.
-- `backend/data`: local SQLite database, excluded from Git.
-- `frontend/src`: application state, components, screens, and styles.
-- `frontend/public`: PWA manifest and public visual assets.
-
-## Структура проекта
-
-- `backend/cmd/api`: маршруты API, авторизация, цели, сессии, статистика, безопасность и тесты.
-- `backend/data`: локальная база SQLite, исключённая из Git.
-- `frontend/src`: состояние приложения, компоненты, экраны и стили.
-- `frontend/public`: PWA manifest и публичные визуальные ресурсы.
-
-## Current Limitations
-
-Background Web Push is not implemented yet. On iPhone, background notifications will require an installed Home Screen web app, a service worker, push subscriptions, and backend delivery. Email change, password reset by email, account deletion, and deployment infrastructure are also planned.
-
-The timer speed selector is a temporary development control for manual testing.
-
-## Текущие ограничения
-
-Фоновый Web Push пока не реализован. На iPhone для фоновых уведомлений потребуются установка приложения на экран «Домой», service worker, push-подписки и отправка уведомлений с backend. Также запланированы смена email, сброс пароля через email, удаление аккаунта и инфраструктура deployment.
-
-Переключатель скорости таймера — временный инструмент разработки для ручного тестирования.
+Для production необходимы HTTPS, защищённые cookie, явный публичный origin, SMTP для писем аккаунта, постоянное хранилище SQLite и регулярные внешние резервные копии. Временное ускорение таймера доступно только в режиме разработки. Фоновый Web Push пока не реализован.

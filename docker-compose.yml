@@ -1,0 +1,33 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      PROGRESS_TRACKER_HOST: 0.0.0.0
+      PROGRESS_TRACKER_PORT: 8080
+      PROGRESS_TRACKER_DB_PATH: /app/data/progress.db
+      PROGRESS_TRACKER_ALLOWED_ORIGINS: http://127.0.0.1:8088
+      PROGRESS_TRACKER_TRUST_PROXY: "true"
+      PROGRESS_TRACKER_DEV_TIMER_SPEED: "false"
+      PROGRESS_TRACKER_DEV_ACTION_TOKENS: "true"
+    volumes:
+      - progress-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8088:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  progress-data:

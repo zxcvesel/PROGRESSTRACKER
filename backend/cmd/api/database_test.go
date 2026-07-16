@@ -28,7 +28,11 @@ func TestSessionDateMigrationMergesDuplicates(t *testing.T) {
 			applied_at TEXT NOT NULL
 		);
 		INSERT INTO schema_migrations (version, name, applied_at)
-		VALUES (1, 'existing schema', '2026-07-13T00:00:00Z');
+		VALUES
+			(1, 'existing schema', '2026-07-13T00:00:00Z'),
+			(3, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
+			(4, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
+			(5, 'not part of this isolated test', '2026-07-13T00:00:00Z');
 		CREATE TABLE sessions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			goal_id INTEGER NOT NULL,
