@@ -30,6 +30,17 @@ test('registers, creates a goal, and saves a server-timed session', async ({ pag
   await page.getByRole('button', { name: 'Save session' }).click()
 
   await expect(page.getByText('1m / 5m')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Back to goals' }).click()
+  await page.getByRole('button', { name: 'Open settings' }).click()
+  const settingsDrawer = page.locator('aside.settings-drawer')
+  await expect(settingsDrawer).toBeVisible()
+  await expect(settingsDrawer.locator(':scope > details.settings-group')).toHaveCount(7)
+
+  await settingsDrawer.getByRole('heading', { name: 'Account' }).click()
+  await expect(settingsDrawer.getByRole('button', { name: 'Log out', exact: true })).toHaveCount(1)
+  await settingsDrawer.locator('details.settings-details > summary').filter({ hasText: 'Display name' }).click()
+  await expect(settingsDrawer.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
 })
 
 test('resets a forgotten password and invalidates the old one', async ({ page }) => {

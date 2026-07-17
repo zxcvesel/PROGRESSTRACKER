@@ -173,7 +173,6 @@ const defaultStats: AppStats = {
   goalTitle: '',
 }
 
-const timerSpeeds = [0.5, 1, 1.5, 2, 5]
 const settingsStorageKey = 'progress-tracker-settings'
 const reminderStorageKey = 'progress-tracker-last-reminder'
 const defaultSettings: AppSettings = {
@@ -235,15 +234,13 @@ const translations = {
     account: 'Account',
     signedInAs: 'Signed in as',
     displayName: 'Display name',
-    saveProfile: 'Save profile',
+    saveProfile: 'Save',
     profileSaved: 'Profile updated',
     profileError: 'Could not update profile',
     changePassword: 'Change password',
     passwordChanged: 'Password changed',
     passwordChangeError: 'Could not change password',
     logout: 'Log out',
-    logoutAll: 'Log out on all devices',
-    logoutAllConfirm: 'Log out on all devices?',
     deleteAccount: 'Delete account',
     deleteAccountHint: 'This permanently removes your goals, sessions, and account data.',
     deleteAccountConfirm: 'Enter your current password to permanently delete the account.',
@@ -293,7 +290,6 @@ const translations = {
     leftToday: 'left today',
     todayTarget: 'Today target',
     practiced: 'practiced',
-    devTimer: 'Dev timer',
     startSession: 'Start session',
     sessionRunning: 'Session running',
     paused: 'Paused',
@@ -452,15 +448,13 @@ const translations = {
     account: 'Аккаунт',
     signedInAs: 'Вы вошли как',
     displayName: 'Имя',
-    saveProfile: 'Сохранить профиль',
+    saveProfile: 'Сохранить',
     profileSaved: 'Профиль обновлен',
     profileError: 'Не удалось обновить профиль',
     changePassword: 'Сменить пароль',
     passwordChanged: 'Пароль изменен',
     passwordChangeError: 'Не удалось сменить пароль',
     logout: 'Выйти',
-    logoutAll: 'Выйти на всех устройствах',
-    logoutAllConfirm: 'Выйти из аккаунта на всех устройствах?',
     deleteAccount: 'Удалить аккаунт',
     deleteAccountHint: 'Цели, сессии и данные аккаунта будут удалены безвозвратно.',
     deleteAccountConfirm: 'Введите текущий пароль, чтобы навсегда удалить аккаунт.',
@@ -510,7 +504,6 @@ const translations = {
     leftToday: 'осталось сегодня',
     todayTarget: 'Дневная норма',
     practiced: 'занятий',
-    devTimer: 'Dev timer',
     startSession: 'Начать сессию',
     sessionRunning: 'Сессия идет',
     paused: 'Пауза',
@@ -667,7 +660,6 @@ function App() {
   const [sessionGoalId, setSessionGoalId] = useState<number | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [timerTargetSeconds, setTimerTargetSeconds] = useState(0)
-  const [timerSpeed, setTimerSpeed] = useState(1)
   const [finishModalOpen, setFinishModalOpen] = useState(false)
   const [sessionNotes, setSessionNotes] = useState('')
   const [sessionTags, setSessionTags] = useState('')
@@ -767,7 +759,6 @@ function App() {
             setSessionGoalId(timerStatus.timer.goalId)
             setElapsedSeconds(timerStatus.timer.elapsedSeconds)
             setTimerTargetSeconds(timerStatus.timer.targetSeconds)
-            setTimerSpeed(timerStatus.timer.speedMultiplier)
             setSessionState(timerStatus.timer.state === 'running' ? 'running' : 'paused')
             setFinishModalOpen(timerStatus.timer.state === 'finished')
           }
@@ -842,7 +833,7 @@ function App() {
 
     const timer = window.setInterval(() => {
       setElapsedSeconds((current) => {
-        const next = current + timerSpeed
+        const next = current + 1
 
         if (timerTargetSeconds > 0 && next >= timerTargetSeconds) {
           window.clearInterval(timer)
@@ -859,7 +850,7 @@ function App() {
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [copy.targetReachedNotification, goalDetail, notificationPermission, sessionState, settings.notificationsEnabled, timerSpeed, timerTargetSeconds])
+  }, [copy.targetReachedNotification, goalDetail, notificationPermission, sessionState, settings.notificationsEnabled, timerTargetSeconds])
 
   useEffect(() => {
     if (!currentUser || sessionState === 'idle') {
@@ -939,7 +930,6 @@ function App() {
       setSessionGoalId(timer.goalId)
       setElapsedSeconds(timer.elapsedSeconds)
       setTimerTargetSeconds(timer.targetSeconds)
-      setTimerSpeed(timer.speedMultiplier)
       setSessionState(timer.state === 'running' ? 'running' : 'paused')
       if (timer.state === 'finished') {
         setFinishModalOpen(true)
@@ -1071,22 +1061,6 @@ function App() {
       window.alert(error instanceof Error ? `${copy.logoutError}: ${error.message}` : copy.logoutError)
     } finally {
       handleAuthReset()
-    }
-  }
-
-  async function handleLogoutAll() {
-    if (!window.confirm(copy.logoutAllConfirm)) {
-      return
-    }
-    try {
-      const response = await apiFetch('/api/me/sessions', { method: 'DELETE' })
-      if (!response.ok) {
-        setAccountError(await readApiError(response, copy.logoutError))
-        return
-      }
-      handleAuthReset()
-    } catch {
-      setAccountError(copy.logoutError)
     }
   }
 
@@ -1301,7 +1275,7 @@ function App() {
       const response = await apiFetch(`/api/goals/${goalDetail.id}/timer/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ speedMultiplier: timerSpeed }),
+        body: JSON.stringify({ speedMultiplier: 1 }),
       })
       if (!response.ok) {
         setFormError(await readApiError(response, copy.saveSessionError))
@@ -1311,7 +1285,6 @@ function App() {
       setSessionGoalId(timer.goalId)
       setElapsedSeconds(timer.elapsedSeconds)
       setTimerTargetSeconds(timer.targetSeconds)
-      setTimerSpeed(timer.speedMultiplier)
       setSessionState('running')
       setFormError('')
     } catch {
@@ -1535,7 +1508,6 @@ function App() {
     setSessionNotes('')
     setSessionTags('')
     setFormError('')
-    setTimerSpeed(1)
   }
 
   function leaveGoalView() {
@@ -1669,7 +1641,6 @@ function App() {
                   copy={copy}
                   language={settings.language}
                   elapsedSeconds={sessionGoalId === goalDetail.id ? elapsedSeconds : 0}
-                  timerSpeed={timerSpeed}
                   isEditingGoal={isEditingGoal}
                   editGoalForm={editGoalForm}
                   formError={formError}
@@ -1677,11 +1648,6 @@ function App() {
                   editingSessionId={editingSessionId}
                   sessionEditNotes={sessionEditNotes}
                   sessionEditTags={sessionEditTags}
-                  onTimerSpeedChange={(speed) => {
-                    if (sessionState === 'idle') {
-                      setTimerSpeed(speed)
-                    }
-                  }}
                   onEditGoalChange={setEditGoalForm}
                   onEditGoalSubmit={updateGoal}
                   onEditGoalStart={startEditGoal}
@@ -1802,7 +1768,6 @@ function App() {
           onProfileSubmit={updateProfile}
           onPasswordSubmit={changePassword}
           onLogout={handleLogout}
-          onLogoutAll={() => void handleLogoutAll()}
           onDeleteAccount={handleDeleteAccount}
           onExport={(format) => void exportAccount(format)}
           onToggleNotifications={toggleNotifications}
@@ -1817,7 +1782,6 @@ function GoalDetailsScreen({
   copy,
   language,
   elapsedSeconds,
-  timerSpeed,
   isEditingGoal,
   editGoalForm,
   formError,
@@ -1825,7 +1789,6 @@ function GoalDetailsScreen({
   editingSessionId,
   sessionEditNotes,
   sessionEditTags,
-  onTimerSpeedChange,
   onEditGoalChange,
   onEditGoalSubmit,
   onEditGoalStart,
@@ -1846,7 +1809,6 @@ function GoalDetailsScreen({
   copy: Copy
   language: AppLanguage
   elapsedSeconds: number
-  timerSpeed: number
   isEditingGoal: boolean
   editGoalForm: GoalForm
   formError: string
@@ -1854,7 +1816,6 @@ function GoalDetailsScreen({
   editingSessionId: number | null
   sessionEditNotes: string
   sessionEditTags: string
-  onTimerSpeedChange: (speed: number) => void
   onEditGoalChange: (form: GoalForm) => void
   onEditGoalSubmit: (event: FormEvent<HTMLFormElement>) => void
   onEditGoalStart: () => void
@@ -1971,23 +1932,6 @@ function GoalDetailsScreen({
 
       {!isEditingGoal && activeTab === 'overview' && <>
         <section className="timer-panel">
-        <div className="dev-speed-panel" aria-label="Development timer speed">
-          <span>{copy.devTimer}</span>
-          <div>
-            {timerSpeeds.map((speed) => (
-              <button
-                className={timerSpeed === speed ? 'is-selected' : ''}
-                type="button"
-                key={speed}
-                disabled={sessionState !== 'idle'}
-                onClick={() => onTimerSpeedChange(speed)}
-              >
-                {speed}x
-              </button>
-            ))}
-          </div>
-        </div>
-
         {sessionState === 'idle' && (
           <button className="primary-button primary-button--large" type="button" onClick={onStart}>
             {copy.startSession}

@@ -460,6 +460,7 @@ func TestAPISessionLifecycleRecalculatesProgressAndStats(t *testing.T) {
 
 func TestAPIServerTimerLifecycle(t *testing.T) {
 	setupTestDatabase(t)
+	t.Setenv("PROGRESS_TRACKER_DEV_TIMER_SPEED", "true")
 	router := newRouter()
 	cookie := registerAPIUser(t, router, "timer@example.com")
 	goal := createAPIGoal(t, router, cookie, "Server timer", 10)

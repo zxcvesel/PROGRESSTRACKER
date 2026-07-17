@@ -98,10 +98,11 @@ export function AuthScreen({
           </label>
         )}
 
-        {!isForgot && <label>
-          {copy.password}
+        {!isForgot && <div className="auth-field">
+          <label htmlFor="auth-password">{copy.password}</label>
           <span className="password-field">
             <input
+              id="auth-password"
               type={showPassword ? 'text' : 'password'}
               autoComplete={isRegister || isReset ? 'new-password' : 'current-password'}
               minLength={8}
@@ -117,7 +118,7 @@ export function AuthScreen({
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </span>
-        </label>}
+        </div>}
 
         {(isRegister || isReset) && (
           <label>
@@ -142,26 +143,28 @@ export function AuthScreen({
           </label>
         )}
 
-        {!isForgot && <span className="form-hint">{copy.passwordHint}</span>}
+        {isRegister && <span className="form-hint">{copy.passwordHint}</span>}
         {message && <p className="settings-success">{message}</p>}
         {error && <p className="form-error">{error}</p>}
 
-        <button className="primary-button primary-button--large" type="submit">
-          {isRegister
-            ? copy.createAccount
-            : isForgot
-              ? copy.sendResetLink
-              : isReset
-                ? copy.resetPassword
-                : copy.signIn}
-        </button>
+        {mode === 'login' ? (
+          <div className="auth-login-actions">
+            <button className="primary-button primary-button--large" type="submit">{copy.signIn}</button>
+            <button className="auth-forgot-button" type="button" onClick={() => onModeChange('forgot')}>
+              {copy.forgotPassword}
+            </button>
+          </div>
+        ) : (
+          <button className="primary-button primary-button--large" type="submit">
+            {isRegister
+              ? copy.createAccount
+              : isForgot
+                ? copy.sendResetLink
+                : copy.resetPassword}
+          </button>
+        )}
       </form>
 
-      {mode === 'login' && (
-        <button className="text-button" type="button" onClick={() => onModeChange('forgot')}>
-          {copy.forgotPassword}
-        </button>
-      )}
       <button
         className="ghost-button auth-switch"
         type="button"

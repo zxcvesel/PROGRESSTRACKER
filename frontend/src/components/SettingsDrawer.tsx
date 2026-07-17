@@ -43,7 +43,6 @@ type SettingsCopy = {
   passwordHint: string
   changePassword: string
   logout: string
-  logoutAll: string
   deleteAccount: string
   deleteAccountHint: string
   deleteAccountConfirm: string
@@ -110,7 +109,6 @@ type SettingsDrawerProps = {
   onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void
   onPasswordSubmit: (event: FormEvent<HTMLFormElement>) => void
   onLogout: () => void
-  onLogoutAll: () => void
   onDeleteAccount: (password: string) => Promise<boolean>
   onExport: (format: 'json' | 'csv') => void
   onToggleNotifications: () => void
@@ -134,17 +132,14 @@ export function SettingsDrawer({
   onProfileSubmit,
   onPasswordSubmit,
   onLogout,
-  onLogoutAll,
   onDeleteAccount,
   onExport,
   onToggleNotifications,
 }: SettingsDrawerProps) {
-  const [accountOpen, setAccountOpen] = useState(false)
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
 
   function closeDrawer() {
-    setAccountOpen(false)
     setDeleteAccountOpen(false)
     setDeletePassword('')
     onClose()
@@ -174,11 +169,8 @@ export function SettingsDrawer({
 
         {currentUser && (
           <SettingsGroup title={copy.account}>
-            <button
+            <div
               className="account-summary"
-              type="button"
-              aria-expanded={accountOpen}
-              onClick={() => setAccountOpen((current) => !current)}
             >
               <span className="account-summary__avatar" aria-hidden="true">
                 {(currentUser.name || currentUser.email).slice(0, 1).toUpperCase()}
@@ -187,11 +179,11 @@ export function SettingsDrawer({
                 <strong>{currentUser.name || copy.account}</strong>
                 <small>{currentUser.email}</small>
               </span>
-              <i className={accountOpen ? 'is-open' : ''} aria-hidden="true" />
-            </button>
+            </div>
 
-            {accountOpen && (
-              <div className="account-management">
+            <div className="account-management">
+              <details className="settings-details">
+                <summary>{copy.displayName}</summary>
                 <form className="settings-form" onSubmit={onProfileSubmit}>
                   <label>
                     {copy.displayName}
@@ -203,93 +195,92 @@ export function SettingsDrawer({
                   </label>
                   <button className="ghost-button" type="submit">{copy.saveProfile}</button>
                 </form>
+              </details>
 
-                <details className="settings-details">
-                  <summary>{copy.changePassword}</summary>
-                  <form className="settings-form" onSubmit={onPasswordSubmit}>
-                    <label>
-                      {copy.currentPassword}
-                      <input
-                        type="password"
-                        autoComplete="current-password"
-                        required
-                        value={passwordForm.currentPassword}
-                        onChange={(event) => onPasswordFormChange({ ...passwordForm, currentPassword: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      {copy.newPassword}
-                      <input
-                        type="password"
-                        autoComplete="new-password"
-                        minLength={8}
-                        required
-                        value={passwordForm.newPassword}
-                        onChange={(event) => onPasswordFormChange({ ...passwordForm, newPassword: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      {copy.confirmPassword}
-                      <input
-                        type="password"
-                        autoComplete="new-password"
-                        minLength={8}
-                        required
-                        value={passwordForm.confirmPassword}
-                        onChange={(event) => onPasswordFormChange({ ...passwordForm, confirmPassword: event.target.value })}
-                      />
-                    </label>
-                    <p className="settings-note">{copy.passwordHint}</p>
-                    <button className="ghost-button" type="submit">{copy.changePassword}</button>
-                  </form>
-                </details>
+              <details className="settings-details">
+                <summary>{copy.changePassword}</summary>
+                <form className="settings-form" onSubmit={onPasswordSubmit}>
+                  <label>
+                    {copy.currentPassword}
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      required
+                      value={passwordForm.currentPassword}
+                      onChange={(event) => onPasswordFormChange({ ...passwordForm, currentPassword: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    {copy.newPassword}
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      value={passwordForm.newPassword}
+                      onChange={(event) => onPasswordFormChange({ ...passwordForm, newPassword: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    {copy.confirmPassword}
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      value={passwordForm.confirmPassword}
+                      onChange={(event) => onPasswordFormChange({ ...passwordForm, confirmPassword: event.target.value })}
+                    />
+                  </label>
+                  <p className="settings-note">{copy.passwordHint}</p>
+                  <button className="ghost-button" type="submit">{copy.changePassword}</button>
+                </form>
+              </details>
 
-                {accountMessage && <p className="settings-success">{accountMessage}</p>}
-                {accountError && <p className="form-error">{accountError}</p>}
+              <details className="settings-details">
+                <summary>{copy.exportData}</summary>
+                <div className="settings-inline-actions">
+                  <button className="ghost-button" type="button" onClick={() => onExport('json')}>{copy.exportJSON}</button>
+                  <button className="ghost-button" type="button" onClick={() => onExport('csv')}>{copy.exportCSV}</button>
+                </div>
+              </details>
 
-                <button className="ghost-button" type="button" onClick={onLogout}>{copy.logout}</button>
-                <button className="ghost-button" type="button" onClick={onLogoutAll}>{copy.logoutAll}</button>
-
-                <details className="settings-details">
-                  <summary>{copy.exportData}</summary>
-                  <div className="settings-inline-actions">
-                    <button className="ghost-button" type="button" onClick={() => onExport('json')}>{copy.exportJSON}</button>
-                    <button className="ghost-button" type="button" onClick={() => onExport('csv')}>{copy.exportCSV}</button>
-                  </div>
-                </details>
-
-                <details
-                  className="settings-details settings-details--danger"
-                  open={deleteAccountOpen}
-                  onToggle={(event) => setDeleteAccountOpen(event.currentTarget.open)}
+              <details
+                className="settings-details settings-details--danger"
+                open={deleteAccountOpen}
+                onToggle={(event) => setDeleteAccountOpen(event.currentTarget.open)}
+              >
+                <summary>{copy.deleteAccount}</summary>
+                <form
+                  className="settings-form"
+                  onSubmit={async (event) => {
+                    event.preventDefault()
+                    if (await onDeleteAccount(deletePassword)) {
+                      setDeletePassword('')
+                      setDeleteAccountOpen(false)
+                    }
+                  }}
                 >
-                  <summary>{copy.deleteAccount}</summary>
-                  <form
-                    className="settings-form"
-                    onSubmit={async (event) => {
-                      event.preventDefault()
-                      if (await onDeleteAccount(deletePassword)) {
-                        setDeletePassword('')
-                        setDeleteAccountOpen(false)
-                      }
-                    }}
-                  >
-                    <p className="settings-note settings-note--plain">{copy.deleteAccountHint}</p>
-                    <label>
-                      {copy.deleteAccountConfirm}
-                      <input
-                        type="password"
-                        autoComplete="current-password"
-                        required
-                        value={deletePassword}
-                        onChange={(event) => setDeletePassword(event.target.value)}
-                      />
-                    </label>
-                    <button className="ghost-button danger-button" type="submit">{copy.deleteAccountAction}</button>
-                  </form>
-                </details>
-              </div>
-            )}
+                  <p className="settings-note settings-note--plain">{copy.deleteAccountHint}</p>
+                  <label>
+                    {copy.deleteAccountConfirm}
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      required
+                      value={deletePassword}
+                      onChange={(event) => setDeletePassword(event.target.value)}
+                    />
+                  </label>
+                  <button className="ghost-button danger-button" type="submit">{copy.deleteAccountAction}</button>
+                </form>
+              </details>
+
+              {accountMessage && <p className="settings-success">{accountMessage}</p>}
+              {accountError && <p className="form-error">{accountError}</p>}
+
+              <button className="ghost-button account-logout" type="button" onClick={onLogout}>{copy.logout}</button>
+            </div>
           </SettingsGroup>
         )}
 
@@ -447,10 +438,10 @@ export function SettingsDrawer({
 
 function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="settings-group">
-      <h2>{title}</h2>
-      {children}
-    </section>
+    <details className="settings-group">
+      <summary><h2>{title}</h2></summary>
+      <div className="settings-group__content">{children}</div>
+    </details>
   )
 }
 

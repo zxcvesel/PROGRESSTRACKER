@@ -28,10 +28,12 @@ func validateRuntimeConfig() error {
 }
 
 func developmentTimerSpeedEnabled() bool {
-	if value := strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_DEV_TIMER_SPEED")); value != "" {
-		return strings.EqualFold(value, "true")
-	}
+	// Manual timer acceleration is intentionally hidden from the product UI.
+	// It can only be enabled explicitly for isolated development tests.
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_DEV_TIMER_SPEED")), "true")
+}
 
+func loopbackDevelopmentHost() bool {
 	host := strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_HOST"))
 	if host == "" {
 		host = "127.0.0.1"
@@ -43,5 +45,5 @@ func developmentActionTokensEnabled() bool {
 	if value := strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_DEV_ACTION_TOKENS")); value != "" {
 		return strings.EqualFold(value, "true")
 	}
-	return developmentTimerSpeedEnabled()
+	return loopbackDevelopmentHost()
 }
