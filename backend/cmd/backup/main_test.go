@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -36,5 +37,18 @@ func TestCreateBackupProducesReadableSQLiteCopy(t *testing.T) {
 	}
 	if value != "saved" {
 		t.Fatalf("backup value = %q", value)
+	}
+	if err := verifySQLiteDatabase(destination); err != nil {
+		t.Fatalf("verify backup: %v", err)
+	}
+}
+
+func TestVerifySQLiteDatabaseRejectsCorruptFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "corrupt.db")
+	if err := os.WriteFile(path, []byte("not a sqlite database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifySQLiteDatabase(path); err == nil {
+		t.Fatal("corrupt database passed integrity verification")
 	}
 }

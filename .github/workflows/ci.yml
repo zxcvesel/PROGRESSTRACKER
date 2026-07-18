@@ -60,3 +60,22 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         run: npm run test:e2e
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate local Compose configuration
+        run: docker compose -f docker-compose.yml config --quiet
+      - name: Validate staging Compose configuration
+        run: docker compose --env-file .env.staging.example -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.staging.yml config --quiet
+      - name: Build application images
+        run: docker compose -f docker-compose.yml build
+      - name: Smoke test local containers
+        run: |
+          docker compose -f docker-compose.yml up -d --wait
+          curl --fail --silent --show-error http://127.0.0.1:8088/nginx-health
+          curl --fail --silent --show-error http://127.0.0.1:8088/api/ready
+      - name: Stop local containers
+        if: always()
+        run: docker compose -f docker-compose.yml down --volumes

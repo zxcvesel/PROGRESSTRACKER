@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+.cache
+.env
+.env.*
+!.env.example
+isaacpracticegame
+backups
+deploy/certs
+backend/data
+backend/.gocache
+backend/.smoke
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report

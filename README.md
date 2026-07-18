@@ -1,73 +1,61 @@
 # Progress Tracker
 
-## Overview
+## Product
 
-Progress Tracker is a mobile-first web app for building consistent learning habits. Users create long-term goals, complete timed daily sessions, maintain streaks, and review progress in history, statistics, and a calendar.
+Progress Tracker is a mobile-first web application for long-term learning goals. Users complete timed daily sessions, maintain streaks, and review progress through history, statistics, and a calendar.
 
-Current version: **0.1.0 Beta**.
+## Продукт
 
-## Обзор
+Progress Tracker — мобильное веб-приложение для долгосрочных учебных целей. Пользователи выполняют ежедневные сессии по таймеру, поддерживают серии и анализируют историю, статистику и календарь активности.
 
-Progress Tracker — мобильное веб-приложение для формирования стабильных учебных привычек. Пользователи создают долгосрочные цели, выполняют ежедневные сессии по таймеру, поддерживают серии и анализируют историю, статистику и календарь.
+## Main features
 
-Текущая версия: **0.1.0 Beta**.
-
-## Main Features
-
-- Registration, email verification, sign-in, password recovery, global logout, and account deletion.
-- Private goals and server-managed timers with pause, resume, automatic completion, notes, and tags.
-- Daily and total progress, streaks, calendar, completion rates, weekly comparison, and monthly statistics.
-- Goal templates, session history search, JSON/CSV data export, themes, accent colors, font sizes, and English/Russian interfaces.
+- Registration, email verification, sign-in, password recovery, and account deletion.
+- Personal goals with daily targets and a server-managed timer with pause and resume.
+- Session notes and tags, history search, calendar, streaks, weekly comparisons, and monthly statistics.
+- JSON/CSV export, light and dark themes, accent colors, font sizes, and English/Russian interfaces.
 
 ## Основные возможности
 
-- Регистрация, подтверждение email, вход, восстановление пароля, выход на всех устройствах и удаление аккаунта.
-- Личные цели и серверный таймер с паузой, продолжением, автоматическим завершением, заметками и тегами.
-- Дневной и общий прогресс, серии, календарь, процент выполнения, сравнение недель и месячная статистика.
-- Шаблоны целей, поиск по истории, экспорт JSON/CSV, темы, цвета акцента, размеры шрифта и интерфейс на английском/русском языках.
+- Регистрация, подтверждение email, вход, восстановление пароля и удаление аккаунта.
+- Личные цели с дневной нормой и серверным таймером с паузой и продолжением.
+- Заметки и теги сессий, поиск по истории, календарь, серии, сравнение недель и месячная статистика.
+- Экспорт JSON/CSV, светлая и тёмная темы, цвета оформления, размеры шрифта и русский/английский интерфейс.
 
-## Progress Rules
+## Progress rules
 
-- A streak grows only when the daily target is reached; partial practice is still saved.
-- Sessions from the same calendar day are merged into one daily result.
-- Missing a required day resets the current streak. Calendar days follow the account timezone detected from the browser.
+A streak day is counted only when the daily target is reached. Partial practice is saved, sessions from the same calendar day are combined, and a missed required day resets the streak. Calendar days use the account timezone.
 
 ## Правила прогресса
 
-- Серия растёт только после выполнения дневной нормы; частичный прогресс сохраняется.
-- Сессии одного календарного дня объединяются в единый дневной результат.
-- Пропуск обязательного дня сбрасывает серию. Календарный день определяется часовым поясом аккаунта, полученным из браузера.
+День засчитывается в серию только после выполнения дневной нормы. Частичный прогресс сохраняется, сессии одного календарного дня объединяются, а пропущенный обязательный день сбрасывает серию. Дни определяются по часовому поясу аккаунта.
 
 ## Technology
 
-- Go REST API, SQLite, React, TypeScript, and Vite.
-- Argon2id password hashing, hashed session/action tokens, secure cookie settings, Origin checks, rate limiting, strict validation, and account-level data isolation.
-- Go unit/integration tests, Vitest, Playwright, GitHub Actions, Docker Compose, Nginx, health/readiness checks, and structured request logs.
+Go REST API, SQLite, React, TypeScript, Vite, Docker Compose, Nginx, Vitest, Playwright, and GitHub Actions. Passwords use Argon2id; account data is isolated by user; sessions and action tokens are stored as hashes.
 
 ## Технологии
 
-- REST API на Go, SQLite, React, TypeScript и Vite.
-- Argon2id-хеширование паролей, хешированные токены, защищённые cookie, проверка Origin, ограничение запросов, строгая валидация и изоляция данных аккаунтов.
-- Модульные и интеграционные Go-тесты, Vitest, Playwright, GitHub Actions, Docker Compose, Nginx, health/readiness-проверки и структурированные журналы запросов.
+REST API на Go, SQLite, React, TypeScript, Vite, Docker Compose, Nginx, Vitest, Playwright и GitHub Actions. Пароли защищены Argon2id; данные аккаунтов изолированы; токены сессий и действий хранятся в виде хешей.
 
 ## Running
 
-- Local backend: `http://127.0.0.1:8080`.
-- Local frontend: `http://127.0.0.1:5173` or `http://localhost:5173`.
-- Docker Compose frontend: `http://127.0.0.1:8088`.
-- SQLite backups are created with the dedicated `backend/cmd/backup` command or the backup binary included in the backend image.
+- Backend: `http://127.0.0.1:8080`.
+- Vite frontend: `http://127.0.0.1:5173`.
+- Local Docker Compose: `http://127.0.0.1:8088` with `docker compose up --build`.
+- Staging: create `.env.staging` from `.env.staging.example`, provision TLS files in `deploy/certs`, then use `docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.staging.yml up -d --build`.
 
 ## Запуск
 
-- Локальный backend: `http://127.0.0.1:8080`.
-- Локальный frontend: `http://127.0.0.1:5173` или `http://localhost:5173`.
-- Frontend через Docker Compose: `http://127.0.0.1:8088`.
-- Резервные копии SQLite создаются командой `backend/cmd/backup` или отдельным backup-бинарником в backend-образе.
+- Backend: `http://127.0.0.1:8080`.
+- Frontend Vite: `http://127.0.0.1:5173`.
+- Локальный Docker Compose: `http://127.0.0.1:8088`, команда `docker compose up --build`.
+- Staging: создать `.env.staging` из `.env.staging.example`, разместить TLS-файлы в `deploy/certs` и выполнить `docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.staging.yml up -d --build`.
 
-## Production Notes
+## Operations
 
-Production requires HTTPS, secure cookies, an explicit public origin, SMTP for account emails, persistent SQLite storage, and regular off-host backups. Temporary timer acceleration is available only in development. Background Web Push is not implemented yet.
+Production mode requires HTTPS, secure cookies, an explicit public origin, real SMTP credentials with STARTTLS, persistent SQLite storage, and off-host backups. The production Compose stack creates and verifies daily SQLite backups and keeps them in the `progress-backups` volume according to the configured retention period.
 
-## Production-заметки
+## Эксплуатация
 
-Для production необходимы HTTPS, защищённые cookie, явный публичный origin, SMTP для писем аккаунта, постоянное хранилище SQLite и регулярные внешние резервные копии. Временное ускорение таймера доступно только в режиме разработки. Фоновый Web Push пока не реализован.
+Production-режим требует HTTPS, защищённых cookie, явного публичного origin, реального SMTP с STARTTLS, постоянного хранилища SQLite и внешних резервных копий. Production Compose ежедневно создаёт и проверяет SQLite-backup, сохраняя копии в томе `progress-backups` в пределах настроенного срока хранения.

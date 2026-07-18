@@ -15,3 +15,40 @@ services:
   frontend:
     ports: !override
       - "127.0.0.1:8088:80"
+
+  backup:
+    build: ./backend
+    init: true
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        while true; do
+          stamp=$$(date -u +%Y%m%dT%H%M%SZ)
+          target="/app/backups/progress-$${stamp}.db"
+          progress-tracker-backup -db /app/data/progress.db -out "$${target}"
+          find /app/backups -type f -name 'progress-*.db' -mtime +$${PROGRESS_TRACKER_BACKUP_RETENTION_DAYS:-14} -delete
+          sleep "$${PROGRESS_TRACKER_BACKUP_INTERVAL_SECONDS:-86400}"
+        done
+    environment:
+      PROGRESS_TRACKER_BACKUP_INTERVAL_SECONDS: ${PROGRESS_TRACKER_BACKUP_INTERVAL_SECONDS:-86400}
+      PROGRESS_TRACKER_BACKUP_RETENTION_DAYS: ${PROGRESS_TRACKER_BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - progress-data:/app/data
+      - progress-backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  progress-backups:

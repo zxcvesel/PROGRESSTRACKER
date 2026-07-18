@@ -1,6 +1,7 @@
 services:
   backend:
     build: ./backend
+    init: true
     environment:
       PROGRESS_TRACKER_HOST: 0.0.0.0
       PROGRESS_TRACKER_PORT: 8080
@@ -11,23 +12,49 @@ services:
       PROGRESS_TRACKER_DEV_ACTION_TOKENS: "true"
     volumes:
       - progress-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/ready"]
       interval: 10s
       timeout: 3s
       retries: 5
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    init: true
     ports:
       - "8088:80"
     depends_on:
       backend:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   progress-data:

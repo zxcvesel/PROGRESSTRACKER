@@ -107,3 +107,38 @@ func TestDatabaseFileUsesPrivatePermissions(t *testing.T) {
 		t.Fatalf("database permissions = %o, want 600", permissions)
 	}
 }
+
+func TestOpenDatabaseAppliesMigrationsAndReopensCleanly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "migrations", "progress.db")
+	t.Setenv("PROGRESS_TRACKER_DB_PATH", path)
+
+	database, err := openDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var migrationCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if migrationCount != len(databaseMigrations) {
+		database.Close()
+		t.Fatalf("migration count = %d, want %d", migrationCount, len(databaseMigrations))
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := openDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var integrity string
+	if err := reopened.QueryRow(`PRAGMA integrity_check`).Scan(&integrity); err != nil {
+		t.Fatal(err)
+	}
+	if integrity != "ok" {
+		t.Fatalf("integrity check = %q", integrity)
+	}
+}

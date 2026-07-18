@@ -7,11 +7,13 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/progress-tracker .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/progress-tracker-backup ./cmd/backup
 
 FROM alpine:3.23
-RUN addgroup -S app && adduser -S -G app app
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S app \
+    && adduser -S -G app app
 WORKDIR /app
 COPY --from=build /out/progress-tracker /usr/local/bin/progress-tracker
 COPY --from=build /out/progress-tracker-backup /usr/local/bin/progress-tracker-backup
-RUN mkdir -p /app/data && chown -R app:app /app
+RUN mkdir -p /app/data /app/backups && chown -R app:app /app
 USER app
 EXPOSE 8080
 ENTRYPOINT ["progress-tracker"]
