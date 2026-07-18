@@ -22,6 +22,7 @@ func setupTestDatabase(t *testing.T) {
 	dbPath := t.TempDir() + "/progress.db"
 	t.Cleanup(func() {
 		time.Local = previousLocation
+		pushNotifications = nil
 		if db != nil {
 			db.Close()
 			db = nil

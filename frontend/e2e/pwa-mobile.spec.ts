@@ -25,6 +25,7 @@ test('installs the production service worker and reloads the app shell offline',
   expect(workerResponse.ok()).toBe(true)
   const workerSource = await workerResponse.text()
   expect(workerSource).toContain("url.pathname.startsWith('/api/')")
+  expect(workerSource).toContain("addEventListener('push'")
 
   await context.setOffline(true)
   await page.reload()

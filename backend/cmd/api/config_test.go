@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	webpush "github.com/SherClockHolmes/webpush-go"
+)
 
 func setValidProductionConfig(t *testing.T) {
 	t.Helper()
@@ -13,6 +17,13 @@ func setValidProductionConfig(t *testing.T) {
 	t.Setenv("PROGRESS_TRACKER_SMTP_FROM", "no-reply@progress.example.com")
 	t.Setenv("PROGRESS_TRACKER_DEV_TIMER_SPEED", "false")
 	t.Setenv("PROGRESS_TRACKER_DEV_ACTION_TOKENS", "false")
+	privateKey, publicKey, err := webpush.GenerateVAPIDKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROGRESS_TRACKER_VAPID_SUBJECT", "mailto:notifications@progress.example.com")
+	t.Setenv("PROGRESS_TRACKER_VAPID_PUBLIC_KEY", publicKey)
+	t.Setenv("PROGRESS_TRACKER_VAPID_PRIVATE_KEY", privateKey)
 }
 
 func TestValidateRuntimeConfigAcceptsSecureProductionConfig(t *testing.T) {
@@ -35,6 +46,9 @@ func TestValidateRuntimeConfigRejectsUnsafeProductionConfig(t *testing.T) {
 		{"invalid SMTP port", "PROGRESS_TRACKER_SMTP_PORT", "70000"},
 		{"development timer", "PROGRESS_TRACKER_DEV_TIMER_SPEED", "true"},
 		{"development action tokens", "PROGRESS_TRACKER_DEV_ACTION_TOKENS", "true"},
+		{"missing VAPID public key", "PROGRESS_TRACKER_VAPID_PUBLIC_KEY", ""},
+		{"invalid VAPID subject", "PROGRESS_TRACKER_VAPID_SUBJECT", "http://progress.example.com"},
+		{"invalid VAPID private key", "PROGRESS_TRACKER_VAPID_PRIVATE_KEY", "not-base64url"},
 	}
 
 	for _, test := range tests {

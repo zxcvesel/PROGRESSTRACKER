@@ -294,6 +294,33 @@ var databaseMigrations = []databaseMigration{
 			ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC';
 		`,
 	},
+	{
+		version: 6,
+		name:    "web push notifications",
+		SQL: `
+			CREATE TABLE push_subscriptions (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				user_id INTEGER NOT NULL,
+				endpoint TEXT NOT NULL UNIQUE,
+				p256dh TEXT NOT NULL,
+				auth TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+			);
+			CREATE INDEX idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+
+			CREATE TABLE daily_notification_claims (
+				user_id INTEGER NOT NULL,
+				local_date TEXT NOT NULL,
+				claimed_at TEXT NOT NULL,
+				PRIMARY KEY(user_id, local_date),
+				FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+			);
+
+			ALTER TABLE active_timers ADD COLUMN completion_notified_at TEXT;
+		`,
+	},
 }
 
 func configureDatabase(database *sql.DB, path string) error {

@@ -12,6 +12,11 @@ test('registers, creates a goal, and saves a server-timed session', async ({ pag
   await page.getByRole('button', { name: 'Create account', exact: true }).click()
 
   await expect(page.getByText('Create your first goal')).toBeVisible()
+  const pushKeyResponse = await page.request.get('/api/push/public-key')
+  expect(pushKeyResponse.ok()).toBe(true)
+  expect(await pushKeyResponse.json()).toEqual({
+    publicKey: expect.stringMatching(/^[A-Za-z0-9_-]+$/),
+  })
   await page.locator('.empty-state').getByRole('button', { name: 'Create goal' }).click()
   await page.getByLabel('Title').fill('Playwright goal')
   await page.getByLabel('Description').fill('Verify the complete user flow')

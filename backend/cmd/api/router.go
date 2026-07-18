@@ -34,6 +34,9 @@ func newRouter() http.Handler {
 	mux.HandleFunc("POST /goals/{id}/timer/pause", pauseTimerHandler)
 	mux.HandleFunc("POST /goals/{id}/timer/resume", resumeTimerHandler)
 	mux.HandleFunc("POST /goals/{id}/timer/finish", finishTimerHandler)
+	mux.HandleFunc("GET /push/public-key", pushPublicKeyHandler)
+	mux.HandleFunc("POST /push/subscriptions", subscribePushHandler)
+	mux.HandleFunc("DELETE /push/subscriptions", unsubscribePushHandler)
 	mux.HandleFunc("GET /stats", statsHandler)
 
 	return requestLoggingMiddleware(securityMiddleware(mux))

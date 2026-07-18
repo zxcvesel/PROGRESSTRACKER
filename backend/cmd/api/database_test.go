@@ -32,7 +32,8 @@ func TestSessionDateMigrationMergesDuplicates(t *testing.T) {
 			(1, 'existing schema', '2026-07-13T00:00:00Z'),
 			(3, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
 			(4, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
-			(5, 'not part of this isolated test', '2026-07-13T00:00:00Z');
+			(5, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
+			(6, 'not part of this isolated test', '2026-07-13T00:00:00Z');
 		CREATE TABLE sessions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			goal_id INTEGER NOT NULL,
@@ -83,6 +84,46 @@ func TestSessionDateMigrationMergesDuplicates(t *testing.T) {
 	`, "2026-07-12T12:00:00+03:00", "2026-07-12T12:01:00+03:00", "2026-07-12T12:01:00+03:00")
 	if err == nil {
 		t.Fatal("database accepted a duplicate daily session")
+	}
+}
+
+func TestWebPushMigrationSchema(t *testing.T) {
+	setupTestDatabase(t)
+
+	for _, table := range []string{"push_subscriptions", "daily_notification_claims"} {
+		var found int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?
+		`, table).Scan(&found); err != nil {
+			t.Fatal(err)
+		}
+		if found != 1 {
+			t.Fatalf("table %s was not created", table)
+		}
+	}
+
+	rows, err := db.Query(`PRAGMA table_info(active_timers)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	foundColumn := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		if name == "completion_notified_at" {
+			foundColumn = true
+		}
+	}
+	if !foundColumn {
+		t.Fatal("active_timers.completion_notified_at was not created")
 	}
 }
 

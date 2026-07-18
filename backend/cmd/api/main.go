@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"time"
@@ -33,9 +34,17 @@ func main() {
 	}
 	defer database.Close()
 	db = database
+	pushConfig, err := loadPushConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	pushNotifications = newPushNotificationService(pushConfig, webPushSender{config: pushConfig})
 	if err := refreshDailyProgressForAllGoals(); err != nil {
 		log.Fatal(err)
 	}
+	workerContext, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	go pushNotifications.run(workerContext)
 	if err := runServer(newRouter()); err != nil {
 		log.Fatal(err)
 	}

@@ -46,15 +46,36 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
+  const path = typeof event.notification.data?.url === 'string' && event.notification.data.url.startsWith('/')
+    ? event.notification.data.url
+    : '/'
+  const targetURL = new URL(path, self.location.origin).href
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       const existingClient = clients.find((client) => new URL(client.url).origin === self.location.origin)
       if (existingClient) {
-        return existingClient.focus()
+        return existingClient.navigate(targetURL).then(() => existingClient.focus())
       }
-      return self.clients.openWindow('/')
+      return self.clients.openWindow(targetURL)
     }),
   )
+})
+
+self.addEventListener('push', (event) => {
+  let payload = {}
+  try {
+    payload = event.data?.json() || {}
+  } catch {
+    payload = { body: event.data?.text() || '' }
+  }
+
+  event.waitUntil(self.registration.showNotification(payload.title || 'Progress Tracker', {
+    body: payload.body || '',
+    tag: payload.tag || 'progress-tracker',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    data: { url: typeof payload.url === 'string' ? payload.url : '/' },
+  }))
 })
 
 async function networkFirstNavigation(request) {

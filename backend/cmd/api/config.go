@@ -51,6 +51,9 @@ func validateRuntimeConfig() error {
 	if developmentActionTokensEnabled() {
 		return fmt.Errorf("PROGRESS_TRACKER_DEV_ACTION_TOKENS must be false in production")
 	}
+	if _, err := configuredVAPIDValues(); err != nil {
+		return err
+	}
 	return nil
 }
 

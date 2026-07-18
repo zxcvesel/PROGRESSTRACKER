@@ -69,6 +69,9 @@ func TestAPIProtectedRoutesRequireAuthentication(t *testing.T) {
 		{http.MethodPost, "/goals", `{"title":"Private","totalDays":30,"dailyTargetMinutes":10}`},
 		{http.MethodGet, "/goals/1", ""},
 		{http.MethodPost, "/goals/1/timer/start", `{}`},
+		{http.MethodGet, "/push/public-key", ""},
+		{http.MethodPost, "/push/subscriptions", `{}`},
+		{http.MethodDelete, "/push/subscriptions", `{}`},
 		{http.MethodGet, "/stats", ""},
 	}
 

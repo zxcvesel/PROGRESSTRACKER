@@ -8,6 +8,7 @@ import { GoalForm } from './components/GoalForm'
 import { GoalsScreen } from './components/GoalsScreen'
 import { HistorySection } from './components/HistorySection'
 import { readAPIError, requestAPI } from './api/client'
+import { ensurePushSubscription, removePushSubscription } from './pwa'
 
 type View = 'goals' | 'create' | 'stats'
 type SessionState = 'idle' | 'running' | 'paused'
@@ -376,7 +377,7 @@ const translations = {
     disableNotifications: 'Disable',
     notificationsBlocked: 'Blocked in browser',
     notificationsUnsupported: 'Not supported',
-    notificationNote: 'Background reminders are not available in this beta yet.',
+    notificationNote: 'Installed apps can receive these alerts while closed.',
     offlineMessage: 'Offline. New changes require a connection.',
     targetReachedNotification: 'Daily target reached',
     reminderNotification: 'Your daily target is still waiting',
@@ -591,7 +592,7 @@ const translations = {
     disableNotifications: 'Выключить',
     notificationsBlocked: 'Заблокированы в браузере',
     notificationsUnsupported: 'Не поддерживаются',
-    notificationNote: 'Фоновые напоминания в текущей бета-версии пока недоступны.',
+    notificationNote: 'Установленное приложение может получать эти уведомления в закрытом состоянии.',
     offlineMessage: 'Нет сети. Для новых изменений требуется подключение.',
     targetReachedNotification: 'Дневная норма выполнена',
     reminderNotification: 'Дневная норма ещё не выполнена',
@@ -811,6 +812,13 @@ function App() {
   useEffect(() => {
     setAccountName(currentUser?.name || '')
   }, [currentUser])
+
+  useEffect(() => {
+    if (!currentUser?.emailVerified || !settings.notificationsEnabled || notificationPermission !== 'granted') {
+      return
+    }
+    void ensurePushSubscription()
+  }, [currentUser, notificationPermission, settings.notificationsEnabled])
 
   useEffect(() => {
     if (!currentUser || !settings.notificationsEnabled || notificationPermission !== 'granted') {
@@ -1074,6 +1082,7 @@ function App() {
 
   async function handleLogout() {
     try {
+      await removePushSubscription().catch(() => undefined)
       await apiFetch('/api/auth/logout', { method: 'POST' })
     } catch (error) {
       window.alert(error instanceof Error ? `${copy.logoutError}: ${error.message}` : copy.logoutError)
@@ -1094,6 +1103,7 @@ function App() {
       setAccountError(await readApiError(response, copy.deleteAccount))
       return false
     }
+    await removePushSubscription().catch(() => undefined)
     handleAuthReset()
     setAuthMessage(copy.accountDeleted)
     return true
@@ -1541,6 +1551,7 @@ function App() {
   async function toggleNotifications() {
     if (settings.notificationsEnabled) {
       setSettings((current) => ({ ...current, notificationsEnabled: false }))
+      void removePushSubscription()
       return
     }
 
@@ -1554,6 +1565,7 @@ function App() {
       setNotificationPermission(permission)
       if (permission === 'granted') {
         setSettings((current) => ({ ...current, notificationsEnabled: true }))
+        void ensurePushSubscription()
         await showBrowserNotification('Progress Tracker', copy.notificationDescription, 'notifications-enabled')
       }
     } catch {
