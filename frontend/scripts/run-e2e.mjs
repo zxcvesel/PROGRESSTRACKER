@@ -15,6 +15,7 @@ const backend = spawn(backendExecutable, [], {
 })
 const frontend = spawn(process.execPath, [
   resolve('node_modules/vite/bin/vite.js'),
+  'preview',
   '--host', '127.0.0.1',
   '--port', '4174',
 ], {
@@ -29,7 +30,11 @@ try {
     waitForURL('http://127.0.0.1:18080/health'),
     waitForURL('http://127.0.0.1:4174'),
   ])
-  const result = spawnSync(process.execPath, [resolve('node_modules/@playwright/test/cli.js'), 'test'], {
+  const result = spawnSync(process.execPath, [
+    resolve('node_modules/@playwright/test/cli.js'),
+    'test',
+    ...process.argv.slice(2),
+  ], {
     cwd: resolve('.'),
     env: { ...process.env, E2E_EXTERNAL_SERVERS: 'true' },
     stdio: 'inherit',

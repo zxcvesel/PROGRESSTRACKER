@@ -376,7 +376,8 @@ const translations = {
     disableNotifications: 'Disable',
     notificationsBlocked: 'Blocked in browser',
     notificationsUnsupported: 'Not supported',
-    notificationNote: 'Background alerts on iPhone require the app to be installed to the Home Screen and Web Push support.',
+    notificationNote: 'Background reminders are not available in this beta yet.',
+    offlineMessage: 'Offline. New changes require a connection.',
     targetReachedNotification: 'Daily target reached',
     reminderNotification: 'Your daily target is still waiting',
     reminderNotificationBody: 'Open Progress Tracker and continue today’s practice.',
@@ -590,7 +591,8 @@ const translations = {
     disableNotifications: 'Выключить',
     notificationsBlocked: 'Заблокированы в браузере',
     notificationsUnsupported: 'Не поддерживаются',
-    notificationNote: 'Для фоновых уведомлений на iPhone приложение потребуется установить на экран «Домой» и подключить Web Push.',
+    notificationNote: 'Фоновые напоминания в текущей бета-версии пока недоступны.',
+    offlineMessage: 'Нет сети. Для новых изменений требуется подключение.',
     targetReachedNotification: 'Дневная норма выполнена',
     reminderNotification: 'Дневная норма ещё не выполнена',
     reminderNotificationBody: 'Откройте Progress Tracker и продолжите сегодняшнее занятие.',
@@ -677,6 +679,7 @@ function App() {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => (
     'Notification' in window ? Notification.permission : 'unsupported'
   ))
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine)
 
   useEffect(() => {
     let isMounted = true
@@ -791,6 +794,21 @@ function App() {
   }, [settings])
 
   useEffect(() => {
+    const updateConnectionState = () => setIsOnline(navigator.onLine)
+    window.addEventListener('online', updateConnectionState)
+    window.addEventListener('offline', updateConnectionState)
+    return () => {
+      window.removeEventListener('online', updateConnectionState)
+      window.removeEventListener('offline', updateConnectionState)
+    }
+  }, [])
+
+  useEffect(() => {
+    const themeColor = settings.theme === 'light' ? '#edf6f7' : '#071014'
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor)
+  }, [settings.theme])
+
+  useEffect(() => {
     setAccountName(currentUser?.name || '')
   }, [currentUser])
 
@@ -817,7 +835,7 @@ function App() {
         return
       }
 
-      showBrowserNotification(copy.reminderNotification, copy.reminderNotificationBody)
+      void showBrowserNotification(copy.reminderNotification, copy.reminderNotificationBody, 'daily-reminder')
       window.localStorage.setItem(reminderStorageKey, reminderId)
     }
 
@@ -840,7 +858,7 @@ function App() {
           setSessionState('paused')
           setFinishModalOpen(true)
           if (settings.notificationsEnabled && notificationPermission === 'granted') {
-            showBrowserNotification(copy.targetReachedNotification, goalDetail.title)
+            void showBrowserNotification(copy.targetReachedNotification, goalDetail.title, `goal-${goalDetail.id}-complete`)
           }
           return timerTargetSeconds
         }
@@ -1536,7 +1554,7 @@ function App() {
       setNotificationPermission(permission)
       if (permission === 'granted') {
         setSettings((current) => ({ ...current, notificationsEnabled: true }))
-        showBrowserNotification('Progress Tracker', copy.notificationDescription)
+        await showBrowserNotification('Progress Tracker', copy.notificationDescription, 'notifications-enabled')
       }
     } catch {
       setNotificationPermission('unsupported')
@@ -1589,6 +1607,8 @@ function App() {
               title={backendStatus}
             />
           </header>
+
+          {!isOnline && <p className="offline-banner" role="status">{copy.offlineMessage}</p>}
 
           {!currentUser && (
             <AuthScreen
@@ -2154,14 +2174,30 @@ function localDateString(date: Date) {
   return `${year}-${month}-${day}`
 }
 
-function showBrowserNotification(title: string, body: string) {
+async function showBrowserNotification(title: string, body: string, tag: string) {
   if (!('Notification' in window) || Notification.permission !== 'granted') {
     return
   }
+
+  const options: NotificationOptions = {
+    body,
+    tag,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+  }
+
   try {
-    new Notification(title, { body, icon: '/favicon.svg' })
+    const registration = 'serviceWorker' in navigator
+      ? await navigator.serviceWorker.getRegistration()
+      : undefined
+    if (registration) {
+      await registration.showNotification(title, options)
+      return
+    }
+
+    new Notification(title, options)
   } catch {
-    // Mobile browsers may require notifications to be shown by a service worker.
+    // Notification support varies when the site is not installed as an app.
   }
 }
 

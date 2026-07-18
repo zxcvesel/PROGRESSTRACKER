@@ -29,7 +29,7 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'npm run dev -- --host 127.0.0.1 --port 4174',
+      command: 'npm run preview -- --host 127.0.0.1 --port 4174',
       url: 'http://127.0.0.1:4174',
       env: {
         VITE_API_TARGET: 'http://127.0.0.1:18080',
