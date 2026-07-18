@@ -149,10 +149,10 @@ export function AuthScreen({
 
         {mode === 'login' ? (
           <div className="auth-login-actions">
-            <button className="primary-button primary-button--large" type="submit">{copy.signIn}</button>
             <button className="auth-forgot-button" type="button" onClick={() => onModeChange('forgot')}>
               {copy.forgotPassword}
             </button>
+            <button className="primary-button primary-button--large" type="submit">{copy.signIn}</button>
           </div>
         ) : (
           <button className="primary-button primary-button--large" type="submit">

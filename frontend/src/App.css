@@ -632,8 +632,12 @@
 
 .auth-login-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.auth-login-actions > button {
+  min-height: 56px;
 }
 
 .auth-form input,
@@ -812,17 +816,22 @@
   aspect-ratio: 1;
   place-items: center;
   border-radius: 50%;
-  background: conic-gradient(var(--accent) var(--stats-ring-progress), rgba(148, 163, 184, 0.1) 0);
+  background: conic-gradient(
+    from -90deg,
+    var(--accent) 0 var(--stats-ring-progress),
+    rgba(148, 163, 184, 0.12) var(--stats-ring-progress) 100%
+  );
   box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.14);
 }
 
 .stats-completion-ring::before {
   grid-area: 1 / 1;
-  width: 94px;
+  width: calc(100% - 18px);
   aspect-ratio: 1;
   border-radius: 50%;
   content: '';
-  background: var(--panel-solid);
+  background: var(--ring-core-bg);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.07);
 }
 
 .stats-completion-ring div {
@@ -838,7 +847,15 @@
   font-size: calc(25px * var(--font-scale));
 }
 
-.stats-completion-ring span,
+.stats-completion-ring span {
+  max-width: 86px;
+  color: var(--text-strong);
+  font-size: calc(10px * var(--font-scale));
+  font-weight: 750;
+  line-height: 1.25;
+  opacity: 0.86;
+}
+
 .stats-overview__summary span {
   color: var(--muted);
   font-size: calc(10px * var(--font-scale));
@@ -1561,9 +1578,6 @@
     width: 104px;
   }
 
-  .stats-completion-ring::before {
-    width: 78px;
-  }
 }
 
 .activity-calendar {

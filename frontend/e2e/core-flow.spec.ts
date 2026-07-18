@@ -41,6 +41,16 @@ test('registers, creates a goal, and saves a server-timed session', async ({ pag
   await expect(settingsDrawer.getByRole('button', { name: 'Log out', exact: true })).toHaveCount(1)
   await settingsDrawer.locator('details.settings-details > summary').filter({ hasText: 'Display name' }).click()
   await expect(settingsDrawer.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
+
+  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await page.getByRole('button', { name: 'Stats' }).click()
+  const completionRing = page.locator('.stats-completion-ring')
+  await expect(completionRing).toBeVisible()
+  await expect(completionRing).toHaveCSS('background-image', /conic-gradient/)
+  const ringCoreBackground = await completionRing.evaluate((element) => (
+    window.getComputedStyle(element, '::before').backgroundColor
+  ))
+  expect(ringCoreBackground).not.toBe('rgba(0, 0, 0, 0)')
 })
 
 test('resets a forgotten password and invalidates the old one', async ({ page }) => {
