@@ -127,6 +127,20 @@ func TestWebPushMigrationSchema(t *testing.T) {
 	}
 }
 
+func TestLoginAttemptMigrationSchema(t *testing.T) {
+	setupTestDatabase(t)
+
+	var found int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'login_attempts'
+	`).Scan(&found); err != nil {
+		t.Fatal(err)
+	}
+	if found != 1 {
+		t.Fatal("login_attempts table was not created")
+	}
+}
+
 func TestDatabaseFileUsesPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not expose Unix permission bits")

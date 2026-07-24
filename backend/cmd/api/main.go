@@ -23,6 +23,7 @@ const (
 )
 
 var authRateLimiter = newRateLimiter(12, 10*time.Minute)
+var loginAttempts = newLoginAttemptLimiter()
 
 func main() {
 	if err := validateRuntimeConfig(); err != nil {

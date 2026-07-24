@@ -321,6 +321,20 @@ var databaseMigrations = []databaseMigration{
 			ALTER TABLE active_timers ADD COLUMN completion_notified_at TEXT;
 		`,
 	},
+	{
+		version: 7,
+		name:    "persistent login attempt limits",
+		SQL: `
+			CREATE TABLE login_attempts (
+				key_hash TEXT PRIMARY KEY,
+				failure_count INTEGER NOT NULL CHECK(failure_count >= 0),
+				window_started_at TEXT NOT NULL,
+				blocked_until TEXT NOT NULL DEFAULT '',
+				updated_at TEXT NOT NULL
+			);
+			CREATE INDEX idx_login_attempts_updated_at ON login_attempts(updated_at);
+		`,
+	},
 }
 
 func configureDatabase(database *sql.DB, path string) error {

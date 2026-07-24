@@ -232,6 +232,7 @@ const translations = {
     verificationSent: 'Verification email sent.',
     haveAccount: 'Already have an account?',
     authError: 'Could not complete authentication',
+    loginRateLimited: 'Too many sign-in attempts. Try again in 15 minutes.',
     account: 'Account',
     signedInAs: 'Signed in as',
     displayName: 'Display name',
@@ -447,6 +448,7 @@ const translations = {
     verificationSent: 'Письмо с подтверждением отправлено.',
     haveAccount: 'Уже есть аккаунт?',
     authError: 'Не удалось выполнить вход',
+    loginRateLimited: 'Слишком много попыток входа. Повторите через 15 минут.',
     account: 'Аккаунт',
     signedInAs: 'Вы вошли как',
     displayName: 'Имя',
@@ -1052,6 +1054,10 @@ function App() {
       })
 
       if (!response.ok) {
+        if (authMode === 'login' && response.status === 429) {
+          setAuthError(copy.loginRateLimited)
+          return
+        }
         setAuthError(await readApiError(response, copy.authError))
         return
       }

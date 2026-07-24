@@ -13,3 +13,10 @@ frontend/playwright-report/
 !.env.staging.example
 backups/
 deploy/certs/*.pem
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.key
+*.p12
+*.pfx

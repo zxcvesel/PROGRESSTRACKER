@@ -383,7 +383,8 @@ func TestAPIAccountsCannotAccessEachOthersGoalsOrStats(t *testing.T) {
 	otherCookie := registerAPIUser(t, router, "other@example.com")
 
 	goal := createAPIGoal(t, router, ownerCookie, "Owner goal", 15)
-	createSessionForGoal(t, router, ownerCookie, goal.ID, 15)
+	session := createSessionForGoal(t, router, ownerCookie, goal.ID, 15)
+	otherGoal := createAPIGoal(t, router, otherCookie, "Other goal", 15)
 
 	paths := []struct {
 		method string
@@ -394,6 +395,13 @@ func TestAPIAccountsCannotAccessEachOthersGoalsOrStats(t *testing.T) {
 		{http.MethodPatch, fmt.Sprintf("/goals/%d", goal.ID), `{"title":"Hijacked","totalDays":10,"dailyTargetMinutes":10}`},
 		{http.MethodDelete, fmt.Sprintf("/goals/%d", goal.ID), ""},
 		{http.MethodPost, fmt.Sprintf("/goals/%d/timer/start", goal.ID), `{}`},
+		{http.MethodPost, fmt.Sprintf("/goals/%d/timer/pause", goal.ID), ""},
+		{http.MethodPost, fmt.Sprintf("/goals/%d/timer/resume", goal.ID), ""},
+		{http.MethodPost, fmt.Sprintf("/goals/%d/timer/finish", goal.ID), `{}`},
+		{http.MethodPatch, fmt.Sprintf("/goals/%d/sessions/%d", goal.ID, session.ID), `{"notes":"Hijacked"}`},
+		{http.MethodDelete, fmt.Sprintf("/goals/%d/sessions/%d", goal.ID, session.ID), ""},
+		{http.MethodPatch, fmt.Sprintf("/goals/%d/sessions/%d", otherGoal.ID, session.ID), `{"notes":"Hijacked"}`},
+		{http.MethodDelete, fmt.Sprintf("/goals/%d/sessions/%d", otherGoal.ID, session.ID), ""},
 		{http.MethodGet, fmt.Sprintf("/stats?goalId=%d", goal.ID), ""},
 	}
 
@@ -615,13 +623,64 @@ func TestRateLimitKeyTrustsForwardedAddressOnlyWhenConfigured(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
 	request.RemoteAddr = "192.0.2.10:54321"
 	request.Header.Set("X-Forwarded-For", "198.51.100.8, 192.0.2.20")
+	request.Header.Set("X-Real-IP", "203.0.113.25")
 
 	if key := rateLimitKey(request, "login"); key != "login:192.0.2.10" {
 		t.Fatalf("untrusted proxy key = %q", key)
 	}
 	t.Setenv("PROGRESS_TRACKER_TRUST_PROXY", "true")
-	if key := rateLimitKey(request, "login"); key != "login:198.51.100.8" {
+	if key := rateLimitKey(request, "login"); key != "login:203.0.113.25" {
 		t.Fatalf("trusted proxy key = %q", key)
+	}
+}
+
+func TestLoginFailuresArePersistentlyLimited(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	registerAPIUser(t, router, "limited@example.com")
+
+	now := time.Date(2026, time.July, 24, 12, 0, 0, 0, time.UTC)
+	loginAttempts.accountPolicy.limit = 3
+	loginAttempts.clientPolicy.limit = 10
+	loginAttempts.now = func() time.Time { return now }
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		response := apiRequest(t, router, http.MethodPost, "/auth/login",
+			`{"email":"limited@example.com","password":"WrongPassword123!"}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("failed login %d status = %d, body = %s", attempt, response.Code, response.Body.String())
+		}
+	}
+
+	blocked := apiRequest(t, router, http.MethodPost, "/auth/login",
+		`{"email":"limited@example.com","password":"WrongPassword123!"}`, nil)
+	if blocked.Code != http.StatusTooManyRequests || blocked.Header().Get("Retry-After") == "" {
+		t.Fatalf("blocking response status = %d, retry-after = %q, body = %s",
+			blocked.Code, blocked.Header().Get("Retry-After"), blocked.Body.String())
+	}
+
+	loginAttempts = newLoginAttemptLimiter()
+	loginAttempts.now = func() time.Time { return now }
+	stillBlocked := apiRequest(t, router, http.MethodPost, "/auth/login",
+		`{"email":"limited@example.com","password":"Password123!"}`, nil)
+	if stillBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("persistent block status = %d, body = %s", stillBlocked.Code, stillBlocked.Body.String())
+	}
+
+	now = now.Add(loginBlockDuration + time.Second)
+	allowed := apiRequest(t, router, http.MethodPost, "/auth/login",
+		`{"email":"limited@example.com","password":"Password123!"}`, nil)
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("login after block status = %d, body = %s", allowed.Code, allowed.Body.String())
+	}
+
+	var accountRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM login_attempts WHERE key_hash = ?`,
+		loginAttemptKey("account", "limited@example.com")).Scan(&accountRows); err != nil {
+		t.Fatal(err)
+	}
+	if accountRows != 0 {
+		t.Fatalf("successful login retained %d account blocks", accountRows)
 	}
 }
 

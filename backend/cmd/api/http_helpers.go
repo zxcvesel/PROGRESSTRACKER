@@ -90,10 +90,14 @@ func (limiter *rateLimiter) cleanup(cutoff time.Time) {
 }
 
 func rateLimitKey(r *http.Request, action string) string {
+	return action + ":" + clientAddress(r)
+}
+
+func clientAddress(r *http.Request) string {
 	remote := strings.TrimSpace(r.RemoteAddr)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_TRUST_PROXY")), "true") {
-		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
-			remote = strings.TrimSpace(strings.Split(forwarded, ",")[0])
+		if realIP := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); realIP != nil {
+			remote = realIP.String()
 		}
 	}
 	if host, _, err := net.SplitHostPort(remote); err == nil {
@@ -102,7 +106,7 @@ func rateLimitKey(r *http.Request, action string) string {
 	if remote == "" {
 		remote = "unknown"
 	}
-	return action + ":" + remote
+	return remote
 }
 
 func addColumnIfMissing(database *sql.DB, table string, column string, definition string) error {

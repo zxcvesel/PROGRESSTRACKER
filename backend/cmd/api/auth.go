@@ -115,26 +115,32 @@ func cleanupIncompleteRegistration(userID int) {
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if !authRateLimiter.Allow(rateLimitKey(r, "login")) {
-		writeError(w, "too many login attempts", http.StatusTooManyRequests)
-		return
-	}
-
 	var request AuthRequest
 	if !decodeJSON(w, r, &request) {
 		return
 	}
 
-	email, validEmail := normalizeAndValidateEmail(request.Email)
+	email := normalizeEmail(request.Email)
+	retryAfter, err := loginAttempts.retryAfter(r, email)
+	if err != nil {
+		writeError(w, "failed to check login attempts", http.StatusInternalServerError)
+		return
+	}
+	if retryAfter > 0 {
+		writeLoginRateLimit(w, retryAfter)
+		return
+	}
+
+	email, validEmail := normalizeAndValidateEmail(email)
 	if !validEmail || len(request.Password) > maxPasswordLength {
-		writeError(w, "invalid email or password", http.StatusUnauthorized)
+		rejectInvalidLogin(w, r, email)
 		return
 	}
 
 	user, err := loadUserByEmail(email)
 	if err == sql.ErrNoRows {
 		verifyPassword(request.Password, dummyPasswordHash)
-		writeError(w, "invalid email or password", http.StatusUnauthorized)
+		rejectInvalidLogin(w, r, email)
 		return
 	}
 	if err != nil {
@@ -142,7 +148,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !verifyPassword(request.Password, user.PasswordHash) {
-		writeError(w, "invalid email or password", http.StatusUnauthorized)
+		rejectInvalidLogin(w, r, email)
+		return
+	}
+	if err := loginAttempts.clearAccountFailures(email); err != nil {
+		writeError(w, "failed to clear login attempts", http.StatusInternalServerError)
 		return
 	}
 	if passwordNeedsRehash(user.PasswordHash) {
@@ -161,6 +171,19 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	setAuthCookie(w, token)
 
 	writeJSON(w, AuthResponse{User: user}, http.StatusOK)
+}
+
+func rejectInvalidLogin(w http.ResponseWriter, r *http.Request, email string) {
+	retryAfter, err := loginAttempts.recordFailure(r, email)
+	if err != nil {
+		writeError(w, "failed to record login attempt", http.StatusInternalServerError)
+		return
+	}
+	if retryAfter > 0 {
+		writeLoginRateLimit(w, retryAfter)
+		return
+	}
+	writeError(w, "invalid email or password", http.StatusUnauthorized)
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
