@@ -1,32 +1,32 @@
-# Progress Tracker
+# Sparx
 
 ## Product
 
-Progress Tracker is a mobile-first web application for long-term learning goals. Users complete timed daily sessions, maintain streaks, and review progress through history, statistics, and a calendar.
+Sparx is a mobile-first web application for long-term learning goals. Users complete timed daily sessions, maintain streaks, and review progress through history, statistics, and a calendar.
 
 ## Продукт
 
-Progress Tracker — мобильное веб-приложение для долгосрочных учебных целей. Пользователи выполняют ежедневные сессии по таймеру, поддерживают серии и анализируют историю, статистику и календарь активности.
+Sparx — мобильное веб-приложение для долгосрочных учебных целей. Пользователи выполняют ежедневные сессии по таймеру, поддерживают серии и анализируют историю, статистику и календарь активности.
 
 ## Main features
 
 - Registration, email verification, sign-in, password recovery, and account deletion.
 - Personal goals with daily targets and a server-managed timer with pause and resume.
 - Session notes and tags, history search, calendar, streaks, weekly comparisons, and monthly statistics.
-- JSON/CSV export, light and dark themes, accent colors, font sizes, and English/Russian interfaces.
+- JSON/CSV export, light and dark themes, accent colors, selectable app icons, font sizes, and English/Russian interfaces.
 - Installable PWA shell with mobile icons, safe-area layout, offline startup, and session alerts while the app is active.
 - Background Web Push alerts for completed timers and incomplete daily targets.
-- Persistent login-attempt limits and automated secret scanning in CI.
+- Persistent limits for login, registration, password recovery and verification emails; automated secret scanning in CI.
 
 ## Основные возможности
 
 - Регистрация, подтверждение email, вход, восстановление пароля и удаление аккаунта.
 - Личные цели с дневной нормой и серверным таймером с паузой и продолжением.
 - Заметки и теги сессий, поиск по истории, календарь, серии, сравнение недель и месячная статистика.
-- Экспорт JSON/CSV, светлая и тёмная темы, цвета оформления, размеры шрифта и русский/английский интерфейс.
+- Экспорт JSON/CSV, светлая и тёмная темы, цвета оформления, выбор иконки приложения, размеры шрифта и русский/английский интерфейс.
 - Устанавливаемая PWA-оболочка с мобильными иконками, safe area, офлайн-запуском и уведомлениями при активном приложении.
 - Фоновые Web Push-уведомления о завершении таймера и невыполненной дневной норме.
-- Постоянное ограничение попыток входа и автоматическое сканирование секретов в CI.
+- Постоянные ограничения входа, регистрации, восстановления пароля и писем подтверждения; автоматическое сканирование секретов в CI.
 
 ## Progress rules
 

@@ -3,10 +3,26 @@ const BUILD_ASSETS = []
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
-  '/favicon.svg',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/apple-touch-icon.png',
+  '/manifests/manifest-cyan.webmanifest',
+  '/manifests/manifest-purple.webmanifest',
+  '/manifests/manifest-green.webmanifest',
+  '/manifests/manifest-orange.webmanifest',
+  '/favicons/icon-cyan.svg',
+  '/favicons/icon-purple.svg',
+  '/favicons/icon-green.svg',
+  '/favicons/icon-orange.svg',
+  '/icons/cyan/icon-192.png',
+  '/icons/cyan/icon-512.png',
+  '/icons/cyan/apple-touch-icon.png',
+  '/icons/purple/icon-192.png',
+  '/icons/purple/icon-512.png',
+  '/icons/purple/apple-touch-icon.png',
+  '/icons/green/icon-192.png',
+  '/icons/green/icon-512.png',
+  '/icons/green/apple-touch-icon.png',
+  '/icons/orange/icon-192.png',
+  '/icons/orange/icon-512.png',
+  '/icons/orange/apple-touch-icon.png',
   ...BUILD_ASSETS,
 ]
 
@@ -69,11 +85,11 @@ self.addEventListener('push', (event) => {
     payload = { body: event.data?.text() || '' }
   }
 
-  event.waitUntil(self.registration.showNotification(payload.title || 'Progress Tracker', {
+  event.waitUntil(self.registration.showNotification(payload.title || 'Sparx', {
     body: payload.body || '',
     tag: payload.tag || 'progress-tracker',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    icon: '/icons/cyan/icon-192.png',
+    badge: '/icons/cyan/icon-192.png',
     data: { url: typeof payload.url === 'string' ? payload.url : '/' },
   }))
 })

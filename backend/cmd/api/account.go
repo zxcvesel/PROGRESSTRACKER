@@ -62,6 +62,13 @@ func resendVerificationHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, ActionResponse{Message: "email is already verified"}, http.StatusOK)
 		return
 	}
+	if !enforceEndpointRateLimit(
+		w,
+		"too many verification email requests; try again later",
+		verificationRateRules(r, user.ID)...,
+	) {
+		return
+	}
 	token, err := issueActionToken(user.ID, "verify_email", verificationTokenLifetime)
 	if err != nil {
 		writeError(w, "failed to create verification link", http.StatusInternalServerError)
@@ -75,8 +82,11 @@ func resendVerificationHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
-	if !authRateLimiter.Allow(rateLimitKey(r, "forgot-password")) {
-		writeError(w, "too many password reset attempts", http.StatusTooManyRequests)
+	if !enforceEndpointRateLimit(
+		w,
+		"too many password reset requests; try again later",
+		passwordResetClientRateRules(r)...,
+	) {
 		return
 	}
 	var request ForgotPasswordRequest
@@ -97,6 +107,13 @@ func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, "failed to prepare password reset", http.StatusInternalServerError)
+		return
+	}
+	if !enforceEndpointRateLimit(
+		w,
+		"too many password reset requests; try again later",
+		passwordResetAccountRateRules(user.Email)...,
+	) {
 		return
 	}
 	token, err := issueActionToken(user.ID, "reset_password", passwordResetLifetime)

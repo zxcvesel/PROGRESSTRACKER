@@ -7,6 +7,7 @@ import { StatsScreen } from './components/StatsScreen'
 import { GoalForm } from './components/GoalForm'
 import { GoalsScreen } from './components/GoalsScreen'
 import { HistorySection } from './components/HistorySection'
+import { LegalDocument, type LegalDocumentType } from './components/LegalDocument'
 import { readAPIError, requestAPI } from './api/client'
 import { ensurePushSubscription, removePushSubscription } from './pwa'
 
@@ -129,6 +130,7 @@ type PasswordForm = {
 type AppSettings = {
   theme: ThemeMode
   accent: AccentColor
+  appIcon: AccentColor
   fontSize: FontSize
   reducedEffects: boolean
   language: AppLanguage
@@ -179,6 +181,7 @@ const reminderStorageKey = 'progress-tracker-last-reminder'
 const defaultSettings: AppSettings = {
   theme: 'dark',
   accent: 'cyan',
+  appIcon: 'cyan',
   fontSize: 'default',
   reducedEffects: false,
   language: 'en',
@@ -233,6 +236,7 @@ const translations = {
     haveAccount: 'Already have an account?',
     authError: 'Could not complete authentication',
     loginRateLimited: 'Too many sign-in attempts. Try again in 15 minutes.',
+    authRateLimited: 'Too many requests. Try again later.',
     account: 'Account',
     signedInAs: 'Signed in as',
     displayName: 'Display name',
@@ -351,6 +355,7 @@ const translations = {
     themeDark: 'Dark',
     themeLight: 'Light',
     accentColor: 'Accent color',
+    appIcon: 'App icon',
     fontSize: 'Font size',
     fontCompact: 'Compact',
     fontDefault: 'Default',
@@ -364,13 +369,13 @@ const translations = {
     defaultHours: 'Default hours',
     confirmGoalDeletion: 'Confirm goal deletion',
     about: 'About',
-    productTagline: 'Daily focus for long-term learning goals.',
+    productTagline: 'Small sessions. Lasting progress.',
     version: 'Version',
     releaseChannel: 'Release channel',
     beta: 'Beta',
     dataPrivacy: 'Your data',
     privateAccountData: 'Private to your account',
-    copyright: '© 2026 Progress Tracker',
+    copyright: '© 2026 Sparx',
     manageAccount: 'Manage account',
     notifications: 'Notifications',
     notificationDescription: 'Reminders while the app is open and session completion alerts.',
@@ -382,13 +387,13 @@ const translations = {
     offlineMessage: 'Offline. New changes require a connection.',
     targetReachedNotification: 'Daily target reached',
     reminderNotification: 'Your daily target is still waiting',
-    reminderNotificationBody: 'Open Progress Tracker and continue today’s practice.',
+    reminderNotificationBody: 'Open Sparx and continue today’s practice.',
     activeSessionOtherGoal: 'Finish or discard the active session before opening another goal.',
     legal: 'Legal',
     privacyPolicy: 'Privacy Policy',
-    privacyText: 'Progress Tracker stores your account details, goals, sessions, notes, tags, and progress to provide the service. Your learning data is separated by account and is not sold or used for advertising. You can export your data or permanently delete the account.',
+    privacyText: 'Read how Sparx stores and protects account and progress data.',
     termsOfUse: 'Terms of Use',
-    termsText: 'Progress Tracker is a personal productivity tool. You are responsible for the information you save and for keeping access to your account secure. The service is provided without guarantees of uninterrupted availability while it remains in beta.',
+    termsText: 'Read the rules for using the Sparx beta service.',
     overview: 'Overview',
     overallProgress: 'Overall progress',
     totalPractice: 'Total practice',
@@ -449,6 +454,7 @@ const translations = {
     haveAccount: 'Уже есть аккаунт?',
     authError: 'Не удалось выполнить вход',
     loginRateLimited: 'Слишком много попыток входа. Повторите через 15 минут.',
+    authRateLimited: 'Слишком много запросов. Попробуйте позже.',
     account: 'Аккаунт',
     signedInAs: 'Вы вошли как',
     displayName: 'Имя',
@@ -567,6 +573,7 @@ const translations = {
     themeDark: 'Темная',
     themeLight: 'Светлая',
     accentColor: 'Цвет акцента',
+    appIcon: 'Иконка приложения',
     fontSize: 'Размер шрифта',
     fontCompact: 'Компактный',
     fontDefault: 'Обычный',
@@ -580,13 +587,13 @@ const translations = {
     defaultHours: 'Часы по умолчанию',
     confirmGoalDeletion: 'Подтверждать удаление цели',
     about: 'О приложении',
-    productTagline: 'Ежедневный фокус для долгосрочных учебных целей.',
+    productTagline: 'Небольшие сессии. Устойчивый прогресс.',
     version: 'Версия',
     releaseChannel: 'Канал выпуска',
     beta: 'Бета',
     dataPrivacy: 'Ваши данные',
     privateAccountData: 'Доступны только вашему аккаунту',
-    copyright: '© 2026 Progress Tracker',
+    copyright: '© 2026 Sparx',
     manageAccount: 'Управление аккаунтом',
     notifications: 'Уведомления',
     notificationDescription: 'Напоминания при открытом приложении и уведомления о завершении сессии.',
@@ -598,13 +605,13 @@ const translations = {
     offlineMessage: 'Нет сети. Для новых изменений требуется подключение.',
     targetReachedNotification: 'Дневная норма выполнена',
     reminderNotification: 'Дневная норма ещё не выполнена',
-    reminderNotificationBody: 'Откройте Progress Tracker и продолжите сегодняшнее занятие.',
+    reminderNotificationBody: 'Откройте Sparx и продолжите сегодняшнее занятие.',
     activeSessionOtherGoal: 'Завершите или отмените активную сессию перед открытием другой цели.',
     legal: 'Правовая информация',
     privacyPolicy: 'Политика конфиденциальности',
-    privacyText: 'Progress Tracker хранит данные аккаунта, цели, сессии, заметки, теги и прогресс для работы сервиса. Учебные данные разделены по аккаунтам, не продаются и не используются для рекламы. Данные можно экспортировать, а аккаунт удалить безвозвратно.',
+    privacyText: 'Узнайте, как Sparx хранит и защищает данные аккаунта и прогресса.',
     termsOfUse: 'Условия использования',
-    termsText: 'Progress Tracker — персональный инструмент продуктивности. Вы отвечаете за сохранённую информацию и безопасность доступа к аккаунту. Пока приложение находится в бета-версии, сервис предоставляется без гарантии непрерывной доступности.',
+    termsText: 'Ознакомьтесь с правилами использования бета-версии Sparx.',
     overview: 'Обзор',
     overallProgress: 'Общий прогресс',
     totalPractice: 'Всего практики',
@@ -632,6 +639,7 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings())
   const copy = translations[settings.language]
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [legalDocument, setLegalDocument] = useState<LegalDocumentType | null>(() => legalDocumentFromURL())
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [authMode, setAuthMode] = useState<AuthMode>(() => (
     new URLSearchParams(window.location.search).has('resetToken') ? 'reset' : 'login'
@@ -797,6 +805,12 @@ function App() {
   }, [settings])
 
   useEffect(() => {
+    const syncLegalDocument = () => setLegalDocument(legalDocumentFromURL())
+    window.addEventListener('popstate', syncLegalDocument)
+    return () => window.removeEventListener('popstate', syncLegalDocument)
+  }, [])
+
+  useEffect(() => {
     const updateConnectionState = () => setIsOnline(navigator.onLine)
     window.addEventListener('online', updateConnectionState)
     window.addEventListener('offline', updateConnectionState)
@@ -810,6 +824,15 @@ function App() {
     const themeColor = settings.theme === 'light' ? '#edf6f7' : '#071014'
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor)
   }, [settings.theme])
+
+  useEffect(() => {
+    document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+      ?.setAttribute('href', `/favicons/icon-${settings.appIcon}.svg`)
+    document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')
+      ?.setAttribute('href', `/icons/${settings.appIcon}/apple-touch-icon.png`)
+    document.querySelector<HTMLLinkElement>('link[rel="manifest"]')
+      ?.setAttribute('href', `/manifests/manifest-${settings.appIcon}.webmanifest`)
+  }, [settings.appIcon])
 
   useEffect(() => {
     setAccountName(currentUser?.name || '')
@@ -942,6 +965,21 @@ function App() {
     return readAPIError(response, fallback)
   }
 
+  function openLegalDocument(type: LegalDocumentType) {
+    const url = new URL(window.location.href)
+    url.searchParams.set('legal', type)
+    window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    setSettingsOpen(false)
+    setLegalDocument(type)
+  }
+
+  function closeLegalDocument() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('legal')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    setLegalDocument(null)
+  }
+
   async function syncActiveTimer() {
     try {
       const response = await apiFetch('/api/timer')
@@ -1005,6 +1043,10 @@ function App() {
           body: JSON.stringify({ email: authForm.email }),
         })
         if (!response.ok) {
+          if (response.status === 429) {
+            setAuthError(copy.authRateLimited)
+            return
+          }
           setAuthError(await readApiError(response, copy.authError))
           return
         }
@@ -1054,8 +1096,8 @@ function App() {
       })
 
       if (!response.ok) {
-        if (authMode === 'login' && response.status === 429) {
-          setAuthError(copy.loginRateLimited)
+        if (response.status === 429) {
+          setAuthError(authMode === 'login' ? copy.loginRateLimited : copy.authRateLimited)
           return
         }
         setAuthError(await readApiError(response, copy.authError))
@@ -1126,7 +1168,7 @@ function App() {
       const blob = await response.blob()
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
-      link.download = format === 'csv' ? 'progress-tracker-sessions.csv' : 'progress-tracker-export.json'
+      link.download = format === 'csv' ? 'sparx-sessions.csv' : 'sparx-export.json'
       link.click()
       URL.revokeObjectURL(link.href)
     } catch {
@@ -1138,7 +1180,9 @@ function App() {
     setVerificationMessage('')
     const response = await apiFetch('/api/auth/resend-verification', { method: 'POST' })
     if (!response.ok) {
-      setVerificationMessage(await readApiError(response, copy.authError))
+      setVerificationMessage(response.status === 429
+        ? copy.authRateLimited
+        : await readApiError(response, copy.authError))
       return
     }
     setVerificationMessage(copy.verificationSent)
@@ -1572,7 +1616,7 @@ function App() {
       if (permission === 'granted') {
         setSettings((current) => ({ ...current, notificationsEnabled: true }))
         void ensurePushSubscription()
-        await showBrowserNotification('Progress Tracker', copy.notificationDescription, 'notifications-enabled')
+        await showBrowserNotification('Sparx', copy.notificationDescription, 'notifications-enabled')
       }
     } catch {
       setNotificationPermission('unsupported')
@@ -1585,11 +1629,12 @@ function App() {
         'page-shell',
         `theme-${settings.theme}`,
         `accent-${settings.accent}`,
+        `app-icon-${settings.appIcon}`,
         `font-${settings.fontSize}`,
         settings.reducedEffects ? 'effects-reduced' : '',
       ].filter(Boolean).join(' ')}
     >
-      <section className="phone-shell" aria-label="Progress Tracker">
+      <section className="phone-shell" aria-label="Sparx">
         <div className="screen-content">
           <header className="top-bar">
             {currentUser ? (
@@ -1642,6 +1687,7 @@ function App() {
               }}
               onChange={setAuthForm}
               onSubmit={handleAuthSubmit}
+              onOpenLegal={openLegalDocument}
             />
           )}
 
@@ -1809,7 +1855,16 @@ function App() {
           onDeleteAccount={handleDeleteAccount}
           onExport={(format) => void exportAccount(format)}
           onToggleNotifications={toggleNotifications}
+          onOpenLegal={openLegalDocument}
         />
+
+        {legalDocument && (
+          <LegalDocument
+            type={legalDocument}
+            language={settings.language}
+            onClose={closeLegalDocument}
+          />
+        )}
       </section>
     </main>
   )
@@ -2144,6 +2199,8 @@ function loadSettings(): AppSettings {
       ...defaultSettings,
       ...parsedSettings,
       theme: normalizeTheme(parsedSettings.theme),
+      accent: normalizeAccent(parsedSettings.accent),
+      appIcon: normalizeAccent(parsedSettings.appIcon),
     }
   } catch {
     return defaultSettings
@@ -2156,6 +2213,14 @@ function normalizeTheme(theme: string | undefined): ThemeMode {
   }
 
   return 'dark'
+}
+
+function normalizeAccent(accent: string | undefined): AccentColor {
+  if (accent === 'purple' || accent === 'orange' || accent === 'green') {
+    return accent
+  }
+
+  return 'cyan'
 }
 
 function formatTimer(seconds: number) {
@@ -2190,6 +2255,11 @@ function localDateString(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function legalDocumentFromURL(): LegalDocumentType | null {
+  const value = new URLSearchParams(window.location.search).get('legal')
+  return value === 'privacy' || value === 'terms' ? value : null
 }
 
 async function showBrowserNotification(title: string, body: string, tag: string) {

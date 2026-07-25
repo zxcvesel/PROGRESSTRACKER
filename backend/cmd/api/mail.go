@@ -38,10 +38,10 @@ func sendAccountActionEmail(to string, kind string, token string) error {
 		publicURL = "http://127.0.0.1:5173"
 	}
 	parameter := "verifyToken"
-	subject := "Verify your Progress Tracker account"
+	subject := "Verify your Sparx account"
 	if kind == "reset_password" {
 		parameter = "resetToken"
-		subject = "Reset your Progress Tracker password"
+		subject = "Reset your Sparx password"
 	}
 	link := publicURL + "/?" + parameter + "=" + url.QueryEscape(token)
 	body := "Open this link to continue:\r\n\r\n" + link + "\r\n\r\nIf you did not request this action, ignore this message."

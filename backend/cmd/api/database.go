@@ -335,6 +335,19 @@ var databaseMigrations = []databaseMigration{
 			CREATE INDEX idx_login_attempts_updated_at ON login_attempts(updated_at);
 		`,
 	},
+	{
+		version: 8,
+		name:    "persistent endpoint rate limits",
+		SQL: `
+			CREATE TABLE endpoint_rate_limits (
+				key_hash TEXT PRIMARY KEY,
+				request_count INTEGER NOT NULL CHECK(request_count >= 0),
+				window_started_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			);
+			CREATE INDEX idx_endpoint_rate_limits_updated_at ON endpoint_rate_limits(updated_at);
+		`,
+	},
 }
 
 func configureDatabase(database *sql.DB, path string) error {

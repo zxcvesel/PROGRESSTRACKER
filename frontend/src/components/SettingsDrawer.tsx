@@ -1,4 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
+import { BrandMark } from './BrandMark'
+import type { LegalDocumentType } from './LegalDocument'
 
 type ThemeMode = 'dark' | 'light'
 type AccentColor = 'cyan' | 'purple' | 'orange' | 'green'
@@ -8,6 +10,7 @@ type AppLanguage = 'en' | 'ru'
 type AppSettings = {
   theme: ThemeMode
   accent: AccentColor
+  appIcon: AccentColor
   fontSize: FontSize
   reducedEffects: boolean
   language: AppLanguage
@@ -55,6 +58,7 @@ type SettingsCopy = {
   themeDark: string
   themeLight: string
   accentColor: string
+  appIcon: string
   fontSize: string
   fontCompact: string
   fontDefault: string
@@ -86,9 +90,7 @@ type SettingsCopy = {
   notificationNote: string
   legal: string
   privacyPolicy: string
-  privacyText: string
   termsOfUse: string
-  termsText: string
 }
 
 type SettingsDrawerProps = {
@@ -112,6 +114,7 @@ type SettingsDrawerProps = {
   onDeleteAccount: (password: string) => Promise<boolean>
   onExport: (format: 'json' | 'csv') => void
   onToggleNotifications: () => void
+  onOpenLegal: (type: LegalDocumentType) => void
 }
 
 export function SettingsDrawer({
@@ -135,6 +138,7 @@ export function SettingsDrawer({
   onDeleteAccount,
   onExport,
   onToggleNotifications,
+  onOpenLegal,
 }: SettingsDrawerProps) {
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
@@ -311,6 +315,24 @@ export function SettingsDrawer({
             </div>
           </div>
 
+          <div className="settings-field">
+            <span>{copy.appIcon}</span>
+            <div className="app-icon-grid" role="list" aria-label={copy.appIcon}>
+              {(['cyan', 'purple', 'green', 'orange'] as AccentColor[]).map((appIcon) => (
+                <button
+                  className={`app-icon-button app-icon-${appIcon} ${settings.appIcon === appIcon ? 'is-selected' : ''}`}
+                  type="button"
+                  key={appIcon}
+                  aria-label={appIcon}
+                  aria-pressed={settings.appIcon === appIcon}
+                  onClick={() => onChange({ appIcon })}
+                >
+                  <BrandMark />
+                </button>
+              ))}
+            </div>
+          </div>
+
           <label>
             {copy.fontSize}
             <select
@@ -406,21 +428,19 @@ export function SettingsDrawer({
         </SettingsGroup>
 
         <SettingsGroup title={copy.legal}>
-          <details className="settings-details legal-details">
-            <summary>{copy.privacyPolicy}</summary>
-            <p>{copy.privacyText}</p>
-          </details>
-          <details className="settings-details legal-details">
-            <summary>{copy.termsOfUse}</summary>
-            <p>{copy.termsText}</p>
-          </details>
+          <button className="settings-link-button" type="button" onClick={() => onOpenLegal('privacy')}>
+            {copy.privacyPolicy}
+          </button>
+          <button className="settings-link-button" type="button" onClick={() => onOpenLegal('terms')}>
+            {copy.termsOfUse}
+          </button>
         </SettingsGroup>
 
         <SettingsGroup title={copy.about}>
           <div className="about-product">
-            <span className="about-product__mark" aria-hidden="true">PT</span>
+            <span className="about-product__mark" aria-hidden="true"><BrandMark /></span>
             <div>
-              <strong>Progress Tracker</strong>
+              <strong>Sparx</strong>
               <p>{copy.productTagline}</p>
             </div>
           </div>

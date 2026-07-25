@@ -36,8 +36,8 @@ func setupTestDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	db = database
-	authRateLimiter = newRateLimiter(12, 10*time.Minute)
 	loginAttempts = newLoginAttemptLimiter()
+	endpointLimits = newEndpointRateLimiter()
 
 	_, err = db.Exec(`
 		INSERT INTO users (id, email, name, password_hash, created_at)

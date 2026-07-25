@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
-	"time"
 )
 
 func writeJSON(w http.ResponseWriter, value any, status int) {
@@ -23,70 +21,6 @@ func writeJSON(w http.ResponseWriter, value any, status int) {
 
 func writeError(w http.ResponseWriter, message string, status int) {
 	writeJSON(w, ErrorResponse{Error: message}, status)
-}
-
-type rateLimiter struct {
-	mu          sync.Mutex
-	limit       int
-	window      time.Duration
-	maxKeys     int
-	lastCleanup time.Time
-	attempts    map[string]rateLimitBucket
-}
-
-type rateLimitBucket struct {
-	times    []time.Time
-	lastSeen time.Time
-}
-
-func newRateLimiter(limit int, window time.Duration) *rateLimiter {
-	return &rateLimiter{
-		limit:    limit,
-		window:   window,
-		maxKeys:  10000,
-		attempts: map[string]rateLimitBucket{},
-	}
-}
-
-func (limiter *rateLimiter) Allow(key string) bool {
-	limiter.mu.Lock()
-	defer limiter.mu.Unlock()
-
-	now := time.Now()
-	cutoff := now.Add(-limiter.window)
-	if limiter.lastCleanup.IsZero() || now.Sub(limiter.lastCleanup) >= limiter.window {
-		limiter.cleanup(cutoff)
-		limiter.lastCleanup = now
-	}
-
-	bucket := limiter.attempts[key]
-	filtered := bucket.times[:0]
-	for _, attempt := range bucket.times {
-		if attempt.After(cutoff) {
-			filtered = append(filtered, attempt)
-		}
-	}
-
-	if len(filtered) >= limiter.limit {
-		limiter.attempts[key] = rateLimitBucket{times: filtered, lastSeen: now}
-		return false
-	}
-	if len(limiter.attempts) >= limiter.maxKeys {
-		if _, exists := limiter.attempts[key]; !exists {
-			return false
-		}
-	}
-
-	limiter.attempts[key] = rateLimitBucket{times: append(filtered, now), lastSeen: now}
-	return true
-}
-
-func (limiter *rateLimiter) cleanup(cutoff time.Time) {
-	for key, bucket := range limiter.attempts {
-		if bucket.lastSeen.Before(cutoff) {
-			delete(limiter.attempts, key)
-		}
-	}
 }
 
 func rateLimitKey(r *http.Request, action string) string {

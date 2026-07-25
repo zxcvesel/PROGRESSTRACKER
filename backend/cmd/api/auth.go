@@ -8,8 +8,11 @@ import (
 )
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
-	if !authRateLimiter.Allow(rateLimitKey(r, "register")) {
-		writeError(w, "too many registration attempts", http.StatusTooManyRequests)
+	if !enforceEndpointRateLimit(
+		w,
+		"too many registration attempts; try again later",
+		registrationRateRules(r)...,
+	) {
 		return
 	}
 

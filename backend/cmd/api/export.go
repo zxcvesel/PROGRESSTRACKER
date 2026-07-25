@@ -43,7 +43,7 @@ func exportAccountHandler(w http.ResponseWriter, r *http.Request) {
 		writeAccountCSV(w, export)
 		return
 	}
-	w.Header().Set("Content-Disposition", `attachment; filename="progress-tracker-export.json"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="sparx-export.json"`)
 	writeJSON(w, export, http.StatusOK)
 }
 
@@ -69,7 +69,7 @@ func loadAllSessions(goalID int) ([]Session, error) {
 
 func writeAccountCSV(w http.ResponseWriter, export accountExport) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="progress-tracker-sessions.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="sparx-sessions.csv"`)
 	w.WriteHeader(http.StatusOK)
 	writer := csv.NewWriter(w)
 	_ = writer.Write([]string{"goal", "date", "started_at", "ended_at", "duration_minutes", "notes", "tags"})

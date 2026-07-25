@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react'
+import { BrandMark } from './BrandMark'
+import type { LegalDocumentType } from './LegalDocument'
 
 type AuthMode = 'login' | 'register' | 'forgot' | 'reset'
 
@@ -30,6 +32,8 @@ type AuthCopy = {
   sendResetLink: string
   resetPassword: string
   backToSignIn: string
+  privacyPolicy: string
+  termsOfUse: string
 }
 
 type AuthScreenProps = {
@@ -41,6 +45,7 @@ type AuthScreenProps = {
   onModeChange: (mode: AuthMode) => void
   onChange: (form: AuthForm) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onOpenLegal: (type: LegalDocumentType) => void
 }
 
 export function AuthScreen({
@@ -52,6 +57,7 @@ export function AuthScreen({
   onModeChange,
   onChange,
   onSubmit,
+  onOpenLegal,
 }: AuthScreenProps) {
   const isRegister = mode === 'register'
   const isForgot = mode === 'forgot'
@@ -60,8 +66,9 @@ export function AuthScreen({
 
   return (
     <section className="auth-screen">
-      <div className="flame-orb" aria-hidden="true">
-        <FlameIcon />
+      <div className="auth-brand" aria-label="Sparx">
+        <BrandMark />
+        <strong>Sparx</strong>
       </div>
       <div>
         <h1>{isRegister
@@ -174,16 +181,13 @@ export function AuthScreen({
           ? copy.backToSignIn
           : <>{isRegister ? copy.haveAccount : copy.noAccount} {isRegister ? copy.signIn : copy.createAccount}</>}
       </button>
-    </section>
-  )
-}
 
-function FlameIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12.2 3.5c.5 2.7-.6 4.4-2 5.9-1.3 1.4-2.5 2.7-2.5 4.9a4.4 4.4 0 0 0 8.8.1c0-1.8-.9-3.4-2.4-4.8.1 1.4-.4 2.4-1.5 3.1-.4-2.6.8-4.7-.4-9.2Z" />
-      <path d="M12 20.8c-4 0-7.1-2.8-7.1-6.8 0-2.7 1.5-4.6 3.1-6.2 1.5-1.5 3.1-3.1 3.2-5.8 4 2.8 6.4 6.4 6.4 10.6 1.1-.9 1.6-2.1 1.6-3.5 1.4 1.5 2 3.1 2 4.8 0 4.1-3.2 6.9-9.2 6.9Z" />
-    </svg>
+      <nav className="auth-legal-links" aria-label={copy.privacyPolicy}>
+        <button type="button" onClick={() => onOpenLegal('privacy')}>{copy.privacyPolicy}</button>
+        <span aria-hidden="true" />
+        <button type="button" onClick={() => onOpenLegal('terms')}>{copy.termsOfUse}</button>
+      </nav>
+    </section>
   )
 }
 

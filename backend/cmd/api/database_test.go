@@ -141,6 +141,20 @@ func TestLoginAttemptMigrationSchema(t *testing.T) {
 	}
 }
 
+func TestEndpointRateLimitMigrationSchema(t *testing.T) {
+	setupTestDatabase(t)
+
+	var found int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'endpoint_rate_limits'
+	`).Scan(&found); err != nil {
+		t.Fatal(err)
+	}
+	if found != 1 {
+		t.Fatal("endpoint_rate_limits table was not created")
+	}
+}
+
 func TestDatabaseFileUsesPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not expose Unix permission bits")

@@ -145,7 +145,7 @@ func loadPushConfig() (vapidConfig, error) {
 		return vapidConfig{}, fmt.Errorf("generate ephemeral VAPID keys: %w", err)
 	}
 	return vapidConfig{
-		Subject:    "mailto:notifications@progress-tracker.local",
+		Subject:    "mailto:notifications@sparx.local",
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
 	}, nil

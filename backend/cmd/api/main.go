@@ -22,8 +22,8 @@ const (
 	legacyRounds      = 120000
 )
 
-var authRateLimiter = newRateLimiter(12, 10*time.Minute)
 var loginAttempts = newLoginAttemptLimiter()
+var endpointLimits = newEndpointRateLimiter()
 
 func main() {
 	if err := validateRuntimeConfig(); err != nil {

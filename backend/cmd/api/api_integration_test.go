@@ -606,16 +606,32 @@ func TestAPIStrictJSONAndBodyLimit(t *testing.T) {
 	}
 }
 
-func TestRateLimiterRejectsRequestsOverLimit(t *testing.T) {
-	limiter := newRateLimiter(2, time.Minute)
-	if !limiter.Allow("login:client") || !limiter.Allow("login:client") {
-		t.Fatal("rate limiter rejected a request before the limit")
+func TestEndpointRateLimiterRejectsRequestsOverLimit(t *testing.T) {
+	setupTestDatabase(t)
+	limiter := newEndpointRateLimiter()
+	now := time.Date(2026, time.July, 25, 11, 0, 0, 0, time.UTC)
+	limiter.now = func() time.Time { return now }
+	rule := endpointRateRule{
+		action: "test",
+		scope:  "client",
+		value:  "client-one",
+		limit:  2,
+		window: time.Minute,
 	}
-	if limiter.Allow("login:client") {
-		t.Fatal("rate limiter allowed a request over the limit")
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if retryAfter, err := limiter.consume(rule); err != nil || retryAfter != 0 {
+			t.Fatalf("attempt %d retry = %s, error = %v", attempt, retryAfter, err)
+		}
 	}
-	if !limiter.Allow("login:other-client") {
-		t.Fatal("rate limiter mixed independent clients")
+	if retryAfter, err := limiter.consume(rule); err != nil || retryAfter <= 0 {
+		t.Fatalf("request over limit retry = %s, error = %v", retryAfter, err)
+	}
+
+	otherRule := rule
+	otherRule.value = "client-two"
+	if retryAfter, err := limiter.consume(otherRule); err != nil || retryAfter != 0 {
+		t.Fatalf("independent client retry = %s, error = %v", retryAfter, err)
 	}
 }
 
@@ -681,6 +697,111 @@ func TestLoginFailuresArePersistentlyLimited(t *testing.T) {
 	}
 	if accountRows != 0 {
 		t.Fatalf("successful login retained %d account blocks", accountRows)
+	}
+}
+
+func TestRegistrationAttemptsArePersistentlyLimited(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+
+	now := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	endpointLimits.now = func() time.Time { return now }
+
+	for attempt := 1; attempt <= registrationRequestLimit; attempt++ {
+		response := apiRequest(t, router, http.MethodPost, "/auth/register", `{}`, nil)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("registration attempt %d status = %d, body = %s",
+				attempt, response.Code, response.Body.String())
+		}
+	}
+
+	blocked := apiRequest(t, router, http.MethodPost, "/auth/register", `{}`, nil)
+	if blocked.Code != http.StatusTooManyRequests || blocked.Header().Get("Retry-After") == "" {
+		t.Fatalf("registration block status = %d, retry-after = %q, body = %s",
+			blocked.Code, blocked.Header().Get("Retry-After"), blocked.Body.String())
+	}
+
+	endpointLimits = newEndpointRateLimiter()
+	endpointLimits.now = func() time.Time { return now }
+	stillBlocked := apiRequest(t, router, http.MethodPost, "/auth/register", `{}`, nil)
+	if stillBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("persistent registration block status = %d, body = %s",
+			stillBlocked.Code, stillBlocked.Body.String())
+	}
+}
+
+func TestPasswordResetRequestsArePersistentlyLimitedPerAccount(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	registerAPIUser(t, router, "reset-limit@example.com")
+
+	now := time.Date(2026, time.July, 25, 13, 0, 0, 0, time.UTC)
+	endpointLimits.now = func() time.Time { return now }
+
+	for attempt := 1; attempt <= passwordResetAccountLimit; attempt++ {
+		response := apiRequest(t, router, http.MethodPost, "/auth/forgot-password",
+			`{"email":"reset-limit@example.com"}`, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("password reset attempt %d status = %d, body = %s",
+				attempt, response.Code, response.Body.String())
+		}
+	}
+
+	blocked := apiRequest(t, router, http.MethodPost, "/auth/forgot-password",
+		`{"email":"reset-limit@example.com"}`, nil)
+	if blocked.Code != http.StatusTooManyRequests || blocked.Header().Get("Retry-After") == "" {
+		t.Fatalf("password reset block status = %d, retry-after = %q, body = %s",
+			blocked.Code, blocked.Header().Get("Retry-After"), blocked.Body.String())
+	}
+
+	endpointLimits = newEndpointRateLimiter()
+	endpointLimits.now = func() time.Time { return now }
+	stillBlocked := apiRequest(t, router, http.MethodPost, "/auth/forgot-password",
+		`{"email":"reset-limit@example.com"}`, nil)
+	if stillBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("persistent password reset block status = %d, body = %s",
+			stillBlocked.Code, stillBlocked.Body.String())
+	}
+}
+
+func TestVerificationResendsArePersistentlyLimitedPerAccount(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+
+	register := apiRequest(t, router, http.MethodPost, "/auth/register", `{
+		"email":"verify-limit@example.com",
+		"name":"Verify Limit",
+		"password":"Password123!",
+		"timezone":"Europe/Moscow"
+	}`, nil)
+	if register.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, body = %s", register.Code, register.Body.String())
+	}
+	cookie := authCookie(t, register)
+
+	now := time.Date(2026, time.July, 25, 14, 0, 0, 0, time.UTC)
+	endpointLimits.now = func() time.Time { return now }
+
+	for attempt := 1; attempt <= verificationAccountLimit; attempt++ {
+		response := apiRequest(t, router, http.MethodPost, "/auth/resend-verification", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("verification resend %d status = %d, body = %s",
+				attempt, response.Code, response.Body.String())
+		}
+	}
+
+	blocked := apiRequest(t, router, http.MethodPost, "/auth/resend-verification", "", cookie)
+	if blocked.Code != http.StatusTooManyRequests || blocked.Header().Get("Retry-After") == "" {
+		t.Fatalf("verification resend block status = %d, retry-after = %q, body = %s",
+			blocked.Code, blocked.Header().Get("Retry-After"), blocked.Body.String())
+	}
+
+	endpointLimits = newEndpointRateLimiter()
+	endpointLimits.now = func() time.Time { return now }
+	stillBlocked := apiRequest(t, router, http.MethodPost, "/auth/resend-verification", "", cookie)
+	if stillBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("persistent verification block status = %d, body = %s",
+			stillBlocked.Code, stillBlocked.Body.String())
 	}
 }
 
