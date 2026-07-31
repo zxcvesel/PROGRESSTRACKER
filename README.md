@@ -1,5 +1,7 @@
 # Sparx
 
+[![CI](https://github.com/zxcvesel/PROGRESSTRACKER/actions/workflows/ci.yml/badge.svg)](https://github.com/zxcvesel/PROGRESSTRACKER/actions/workflows/ci.yml)
+
 ## Product
 
 Sparx is a mobile-first web application for long-term learning goals. Users complete timed daily sessions, maintain streaks, and review progress through history, statistics, and a calendar.
