@@ -19,6 +19,7 @@ Sparx — мобильное веб-приложение для долгосро
 - Installable PWA shell with mobile icons, safe-area layout, offline startup, and session alerts while the app is active.
 - Background Web Push alerts for completed timers and incomplete daily targets.
 - Persistent limits for login, registration, password recovery and verification emails; automated secret scanning in CI.
+- Role-protected admin view for account verification status and active-session revocation.
 
 ## Основные возможности
 
@@ -29,6 +30,7 @@ Sparx — мобильное веб-приложение для долгосро
 - Устанавливаемая PWA-оболочка с мобильными иконками, safe area, офлайн-запуском и уведомлениями при активном приложении.
 - Фоновые Web Push-уведомления о завершении таймера и невыполненной дневной норме.
 - Постоянные ограничения входа, регистрации, восстановления пароля и писем подтверждения; автоматическое сканирование секретов в CI.
+- Защищённая ролью админ-панель со статусами подтверждения аккаунтов и завершением активных входов.
 
 ## Progress rules
 
@@ -52,6 +54,7 @@ REST API на Go, SQLite, React, TypeScript, Vite, Docker Compose, Nginx, Vitest
 - Vite frontend: `http://127.0.0.1:5173`.
 - Local Docker Compose: `http://127.0.0.1:8088` with `docker compose up --build`.
 - Staging: create `.env.staging` from `.env.staging.example`, provision TLS files in `deploy/certs`, then use `docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.staging.yml up -d --build`.
+- Admin access: set `PROGRESS_TRACKER_ADMIN_EMAIL` to an existing account email and restart the backend.
 
 ## Запуск
 
@@ -59,6 +62,7 @@ REST API на Go, SQLite, React, TypeScript, Vite, Docker Compose, Nginx, Vitest
 - Frontend Vite: `http://127.0.0.1:5173`.
 - Локальный Docker Compose: `http://127.0.0.1:8088`, команда `docker compose up --build`.
 - Staging: создать `.env.staging` из `.env.staging.example`, разместить TLS-файлы в `deploy/certs` и выполнить `docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.staging.yml up -d --build`.
+- Доступ администратора: укажите email существующего аккаунта в `PROGRESS_TRACKER_ADMIN_EMAIL` и перезапустите backend.
 
 ## Operations
 

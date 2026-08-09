@@ -8,6 +8,22 @@ type User struct {
 	CreatedAt     string `json:"createdAt"`
 	EmailVerified bool   `json:"emailVerified"`
 	Timezone      string `json:"timezone"`
+	Role          string `json:"role"`
+}
+
+type AdminUserSummary struct {
+	ID             int    `json:"id"`
+	Email          string `json:"email"`
+	Name           string `json:"name"`
+	CreatedAt      string `json:"createdAt"`
+	EmailVerified  bool   `json:"emailVerified"`
+	Role           string `json:"role"`
+	ActiveSessions int    `json:"activeSessions"`
+	GoalCount      int    `json:"goalCount"`
+}
+
+type RevokeSessionsResponse struct {
+	RevokedSessions int64 `json:"revokedSessions"`
 }
 
 type AuthRequest struct {

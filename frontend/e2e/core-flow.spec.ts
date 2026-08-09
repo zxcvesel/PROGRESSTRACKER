@@ -87,3 +87,27 @@ test('resets a forgotten password and invalidates the old one', async ({ page })
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByText('Create your first goal')).toBeVisible()
 })
+
+test('opens the protected admin user access screen', async ({ page }) => {
+  const email = process.env.E2E_ADMIN_EMAIL
+  test.skip(!email, 'E2E_ADMIN_EMAIL is required for the admin flow')
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /No account yet.*Create account/i }).click()
+  await page.getByLabel('Email').fill(email!)
+  await page.getByLabel('Name').fill('E2E Admin')
+  await page.getByLabel('Password', { exact: true }).fill('Password123!')
+  await page.getByLabel('Confirm password').fill('Password123!')
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
+
+  await expect(page.getByText('Create your first goal')).toBeVisible()
+  await page.getByRole('button', { name: 'Open settings' }).click()
+  const settingsDrawer = page.locator('aside.settings-drawer')
+  await settingsDrawer.getByRole('heading', { name: 'Account' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Admin panel' }).click()
+
+  await expect(page.getByRole('heading', { name: 'User access' })).toBeVisible()
+  const adminCard = page.locator('.admin-user-card').filter({ hasText: email! })
+  await expect(adminCard.getByText(email!, { exact: true })).toBeVisible()
+  await expect(adminCard.locator('.admin-role--admin')).toHaveText('Admin')
+})

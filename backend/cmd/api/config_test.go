@@ -49,6 +49,7 @@ func TestValidateRuntimeConfigRejectsUnsafeProductionConfig(t *testing.T) {
 		{"missing VAPID public key", "PROGRESS_TRACKER_VAPID_PUBLIC_KEY", ""},
 		{"invalid VAPID subject", "PROGRESS_TRACKER_VAPID_SUBJECT", "http://progress.example.com"},
 		{"invalid VAPID private key", "PROGRESS_TRACKER_VAPID_PRIVATE_KEY", "not-base64url"},
+		{"invalid administrator email", "PROGRESS_TRACKER_ADMIN_EMAIL", "not-an-email"},
 	}
 
 	for _, test := range tests {

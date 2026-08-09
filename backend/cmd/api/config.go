@@ -10,6 +10,9 @@ import (
 )
 
 func validateRuntimeConfig() error {
+	if _, err := configuredAdminEmail(); err != nil {
+		return err
+	}
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("PROGRESS_TRACKER_ENV")), "production") {
 		return nil
 	}

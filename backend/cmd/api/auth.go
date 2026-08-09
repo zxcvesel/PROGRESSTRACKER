@@ -48,10 +48,11 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createdAt := time.Now().Format(time.RFC3339)
+	role := roleForEmail(email)
 	result, err := db.Exec(`
-		INSERT INTO users (email, name, password_hash, created_at, email_verified, timezone)
-		VALUES (?, ?, ?, ?, 0, ?)
-	`, email, name, passwordHash, createdAt, timezone)
+		INSERT INTO users (email, name, password_hash, created_at, email_verified, timezone, role)
+		VALUES (?, ?, ?, ?, 0, ?, ?)
+	`, email, name, passwordHash, createdAt, timezone, role)
 	if err != nil {
 		writeError(w, "user already exists", http.StatusConflict)
 		return
@@ -70,6 +71,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     createdAt,
 		EmailVerified: false,
 		Timezone:      timezone,
+		Role:          role,
 	}
 	token, err := createAuthSession(user.ID)
 	if err != nil {
@@ -330,7 +332,7 @@ func bearerToken(r *http.Request) (string, bool) {
 
 func loadUserByEmail(email string) (User, error) {
 	row := db.QueryRow(`
-		SELECT id, email, name, password_hash, created_at, email_verified, timezone
+		SELECT id, email, name, password_hash, created_at, email_verified, timezone, role
 		FROM users
 		WHERE email = ?
 	`, email)
@@ -340,7 +342,7 @@ func loadUserByEmail(email string) (User, error) {
 
 func loadUserByID(id int) (User, error) {
 	row := db.QueryRow(`
-		SELECT id, email, name, password_hash, created_at, email_verified, timezone
+		SELECT id, email, name, password_hash, created_at, email_verified, timezone, role
 		FROM users
 		WHERE id = ?
 	`, id)
@@ -349,7 +351,8 @@ func loadUserByID(id int) (User, error) {
 
 func loadUserByToken(token string) (User, error) {
 	row := db.QueryRow(`
-		SELECT users.id, users.email, users.name, users.password_hash, users.created_at, users.email_verified, users.timezone
+		SELECT users.id, users.email, users.name, users.password_hash, users.created_at,
+			users.email_verified, users.timezone, users.role
 		FROM auth_sessions
 		INNER JOIN users ON users.id = auth_sessions.user_id
 		WHERE auth_sessions.token_hash = ? AND auth_sessions.expires_at > ?
@@ -377,6 +380,7 @@ func scanUser(scanner userScanner) (User, error) {
 		&user.CreatedAt,
 		&user.EmailVerified,
 		&user.Timezone,
+		&user.Role,
 	)
 	if err != nil {
 		return User{}, err

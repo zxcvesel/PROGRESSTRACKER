@@ -115,6 +115,10 @@ func openDatabase() (*sql.DB, error) {
 		database.Close()
 		return nil, err
 	}
+	if err := syncConfiguredAdminRole(database); err != nil {
+		database.Close()
+		return nil, err
+	}
 	if err := cleanupExpiredAuthSessions(database); err != nil {
 		database.Close()
 		return nil, err
@@ -346,6 +350,15 @@ var databaseMigrations = []databaseMigration{
 				updated_at TEXT NOT NULL
 			);
 			CREATE INDEX idx_endpoint_rate_limits_updated_at ON endpoint_rate_limits(updated_at);
+		`,
+	},
+	{
+		version: 9,
+		name:    "user roles",
+		SQL: `
+			ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'
+				CHECK(role IN ('user', 'admin'));
+			CREATE INDEX idx_users_role ON users(role);
 		`,
 	},
 }

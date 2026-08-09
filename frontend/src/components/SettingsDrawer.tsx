@@ -24,6 +24,7 @@ type AppSettings = {
 type AuthUser = {
   email: string
   name: string
+  role: 'user' | 'admin'
 }
 
 type PasswordForm = {
@@ -89,6 +90,7 @@ type SettingsCopy = {
   notificationsUnsupported: string
   notificationNote: string
   legal: string
+  adminPanel: string
   privacyPolicy: string
   termsOfUse: string
 }
@@ -115,6 +117,7 @@ type SettingsDrawerProps = {
   onExport: (format: 'json' | 'csv') => void
   onToggleNotifications: () => void
   onOpenLegal: (type: LegalDocumentType) => void
+  onOpenAdmin: () => void
 }
 
 export function SettingsDrawer({
@@ -139,6 +142,7 @@ export function SettingsDrawer({
   onExport,
   onToggleNotifications,
   onOpenLegal,
+  onOpenAdmin,
 }: SettingsDrawerProps) {
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
@@ -186,6 +190,12 @@ export function SettingsDrawer({
             </div>
 
             <div className="account-management">
+              {currentUser.role === 'admin' && (
+                <button className="settings-link-button settings-link-button--admin" type="button" onClick={onOpenAdmin}>
+                  {copy.adminPanel}
+                </button>
+              )}
+
               <details className="settings-details">
                 <summary>{copy.displayName}</summary>
                 <form className="settings-form" onSubmit={onProfileSubmit}>

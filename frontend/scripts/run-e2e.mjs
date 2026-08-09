@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
 const backendExecutable = resolve('../.cache', process.platform === 'win32' ? 'e2e-api.exe' : 'e2e-api')
+const adminEmail = `admin-e2e-${Date.now()}@example.com`
 const backend = spawn(backendExecutable, [], {
   cwd: resolve('../backend'),
   env: {
@@ -10,6 +11,7 @@ const backend = spawn(backendExecutable, [], {
     PROGRESS_TRACKER_PORT: '18080',
     PROGRESS_TRACKER_DB_PATH: 'data/e2e-progress.db',
     PROGRESS_TRACKER_ALLOWED_ORIGINS: 'http://127.0.0.1:4174',
+    PROGRESS_TRACKER_ADMIN_EMAIL: adminEmail,
   },
   stdio: 'inherit',
 })
@@ -36,7 +38,7 @@ try {
     ...process.argv.slice(2),
   ], {
     cwd: resolve('.'),
-    env: { ...process.env, E2E_EXTERNAL_SERVERS: 'true' },
+    env: { ...process.env, E2E_EXTERNAL_SERVERS: 'true', E2E_ADMIN_EMAIL: adminEmail },
     stdio: 'inherit',
   })
   exitCode = result.status ?? 1

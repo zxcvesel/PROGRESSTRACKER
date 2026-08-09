@@ -20,6 +20,8 @@ func newRouter() http.Handler {
 	mux.HandleFunc("GET /me/export", exportAccountHandler)
 	mux.HandleFunc("DELETE /me/sessions", logoutAllHandler)
 	mux.HandleFunc("DELETE /me", deleteAccountHandler)
+	mux.HandleFunc("GET /admin/users", adminUsersHandler)
+	mux.HandleFunc("DELETE /admin/users/{id}/sessions", revokeUserSessionsHandler)
 	mux.HandleFunc("GET /entries", entriesHandler)
 	mux.HandleFunc("POST /entries", createEntryHandler)
 	mux.HandleFunc("GET /goals", goalsHandler)

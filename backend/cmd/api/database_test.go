@@ -33,7 +33,8 @@ func TestSessionDateMigrationMergesDuplicates(t *testing.T) {
 			(3, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
 			(4, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
 			(5, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
-			(6, 'not part of this isolated test', '2026-07-13T00:00:00Z');
+			(6, 'not part of this isolated test', '2026-07-13T00:00:00Z'),
+			(9, 'not part of this isolated test', '2026-07-13T00:00:00Z');
 		CREATE TABLE sessions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			goal_id INTEGER NOT NULL,
@@ -152,6 +153,49 @@ func TestEndpointRateLimitMigrationSchema(t *testing.T) {
 	}
 	if found != 1 {
 		t.Fatal("endpoint_rate_limits table was not created")
+	}
+}
+
+func TestConfiguredAdminEmailPromotesExistingUser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admin", "progress.db")
+	t.Setenv("PROGRESS_TRACKER_DB_PATH", path)
+	t.Setenv("PROGRESS_TRACKER_ADMIN_EMAIL", " ADMIN@Example.com ")
+
+	database, err := openDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO users (email, name, password_hash, created_at, role)
+		VALUES
+			('admin@example.com', 'Admin', 'hash', '2026-08-09T00:00:00Z', 'user'),
+			('former@example.com', 'Former Admin', 'hash', '2026-08-08T00:00:00Z', 'admin')
+	`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err = openDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	var role string
+	if err := database.QueryRow(`SELECT role FROM users WHERE email = 'admin@example.com'`).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role != userRoleAdmin {
+		t.Fatalf("role = %q, want %q", role, userRoleAdmin)
+	}
+	if err := database.QueryRow(`SELECT role FROM users WHERE email = 'former@example.com'`).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role != userRoleUser {
+		t.Fatalf("former role = %q, want %q", role, userRoleUser)
 	}
 }
 

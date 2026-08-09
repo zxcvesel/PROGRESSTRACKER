@@ -8,10 +8,11 @@ import { GoalForm } from './components/GoalForm'
 import { GoalsScreen } from './components/GoalsScreen'
 import { HistorySection } from './components/HistorySection'
 import { LegalDocument, type LegalDocumentType } from './components/LegalDocument'
+import { AdminScreen, type AdminUserSummary } from './components/AdminScreen'
 import { readAPIError, requestAPI } from './api/client'
 import { ensurePushSubscription, removePushSubscription } from './pwa'
 
-type View = 'goals' | 'create' | 'stats'
+type View = 'goals' | 'create' | 'stats' | 'admin'
 type SessionState = 'idle' | 'running' | 'paused'
 type ServerTimerState = 'running' | 'paused' | 'finished'
 type ThemeMode = 'dark' | 'light'
@@ -105,6 +106,7 @@ type AuthUser = {
   createdAt: string
   emailVerified: boolean
   timezone: string
+  role: 'user' | 'admin'
 }
 
 type AuthResponse = {
@@ -198,6 +200,7 @@ const translations = {
     screenStats: 'Stats',
     screenGoal: 'Goal',
     screenGoals: 'Goals',
+    screenAdmin: 'Admin',
     backToGoals: 'Back to goals',
     openSettings: 'Open settings',
     mainNavigation: 'Main navigation',
@@ -377,6 +380,27 @@ const translations = {
     privateAccountData: 'Private to your account',
     copyright: '© 2026 Sparx',
     manageAccount: 'Manage account',
+    adminPanel: 'Admin panel',
+    adminSubtitle: 'Review account access without opening private progress data.',
+    registeredUsers: 'Registered',
+    verifiedUsers: 'Verified',
+    userAccess: 'User access',
+    verified: 'Verified',
+    unverified: 'Not verified',
+    roleAdmin: 'Admin',
+    roleUser: 'User',
+    activeSessions: 'Active sessions',
+    goalsCount: 'Goals',
+    registeredOn: 'Registered',
+    revokeSessions: 'Revoke sessions',
+    revokingSessions: 'Revoking...',
+    currentAccount: 'Current account',
+    noActiveSessions: 'No active sessions',
+    adminEmpty: 'No user accounts found.',
+    refresh: 'Refresh',
+    loadAdminError: 'Could not load users',
+    revokeAdminError: 'Could not revoke sessions',
+    revokeSessionsConfirm: 'Sign this user out on all devices?',
     notifications: 'Notifications',
     notificationDescription: 'Reminders while the app is open and session completion alerts.',
     enableNotifications: 'Enable',
@@ -416,6 +440,7 @@ const translations = {
     screenStats: 'Статистика',
     screenGoal: 'Цель',
     screenGoals: 'Цели',
+    screenAdmin: 'Администратор',
     backToGoals: 'Назад к целям',
     openSettings: 'Открыть настройки',
     mainNavigation: 'Основная навигация',
@@ -595,6 +620,27 @@ const translations = {
     privateAccountData: 'Доступны только вашему аккаунту',
     copyright: '© 2026 Sparx',
     manageAccount: 'Управление аккаунтом',
+    adminPanel: 'Панель администратора',
+    adminSubtitle: 'Управляйте доступом к аккаунтам без просмотра личных данных прогресса.',
+    registeredUsers: 'Пользователей',
+    verifiedUsers: 'Подтверждено',
+    userAccess: 'Доступ пользователей',
+    verified: 'Подтвержден',
+    unverified: 'Не подтвержден',
+    roleAdmin: 'Администратор',
+    roleUser: 'Пользователь',
+    activeSessions: 'Активные входы',
+    goalsCount: 'Целей',
+    registeredOn: 'Регистрация',
+    revokeSessions: 'Завершить входы',
+    revokingSessions: 'Завершение...',
+    currentAccount: 'Текущий аккаунт',
+    noActiveSessions: 'Нет активных входов',
+    adminEmpty: 'Аккаунты пользователей не найдены.',
+    refresh: 'Обновить',
+    loadAdminError: 'Не удалось загрузить пользователей',
+    revokeAdminError: 'Не удалось завершить входы',
+    revokeSessionsConfirm: 'Выйти из аккаунта пользователя на всех устройствах?',
     notifications: 'Уведомления',
     notificationDescription: 'Напоминания при открытом приложении и уведомления о завершении сессии.',
     enableNotifications: 'Включить',
@@ -691,6 +737,10 @@ function App() {
     'Notification' in window ? Notification.permission : 'unsupported'
   ))
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
+  const [adminUsers, setAdminUsers] = useState<AdminUserSummary[]>([])
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminError, setAdminError] = useState('')
+  const [revokingUserId, setRevokingUserId] = useState<number | null>(null)
 
   useEffect(() => {
     let isMounted = true
@@ -930,6 +980,10 @@ function App() {
       return copy.screenStats
     }
 
+    if (view === 'admin') {
+      return copy.screenAdmin
+    }
+
     if (selectedGoalId) {
       return copy.screenGoal
     }
@@ -1015,6 +1069,9 @@ function App() {
     setView('goals')
     setAccountMessage('')
     setAccountError('')
+    setAdminUsers([])
+    setAdminError('')
+    setRevokingUserId(null)
     setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
     resetSession()
   }
@@ -1295,6 +1352,56 @@ function App() {
     }
     const data = (await response.json()) as GoalDetail
     setGoalDetail(data)
+  }
+
+  async function loadAdminUsers() {
+    if (currentUser?.role !== 'admin') {
+      return
+    }
+    setAdminLoading(true)
+    setAdminError('')
+    try {
+      const response = await apiFetch('/api/admin/users')
+      if (!response.ok) {
+        setAdminError(await readApiError(response, copy.loadAdminError))
+        return
+      }
+      setAdminUsers((await response.json()) as AdminUserSummary[])
+    } catch {
+      setAdminError(copy.loadAdminError)
+    } finally {
+      setAdminLoading(false)
+    }
+  }
+
+  function openAdminPanel() {
+    if (currentUser?.role !== 'admin') {
+      return
+    }
+    leaveGoalView()
+    setSettingsOpen(false)
+    setView('admin')
+    void loadAdminUsers()
+  }
+
+  async function revokeAdminUserSessions(user: AdminUserSummary) {
+    if (!window.confirm(copy.revokeSessionsConfirm)) {
+      return
+    }
+    setRevokingUserId(user.id)
+    setAdminError('')
+    try {
+      const response = await apiFetch(`/api/admin/users/${user.id}/sessions`, { method: 'DELETE' })
+      if (!response.ok) {
+        setAdminError(await readApiError(response, copy.revokeAdminError))
+        return
+      }
+      await loadAdminUsers()
+    } catch {
+      setAdminError(copy.revokeAdminError)
+    } finally {
+      setRevokingUserId(null)
+    }
   }
 
   async function handleCreateGoal(event: FormEvent<HTMLFormElement>) {
@@ -1639,10 +1746,14 @@ function App() {
           <header className="top-bar">
             {currentUser ? (
               <button
-                className={`icon-button ${selectedGoalId ? 'icon-button--back' : 'icon-button--menu'}`}
+                className={`icon-button ${selectedGoalId || view === 'admin' ? 'icon-button--back' : 'icon-button--menu'}`}
                 type="button"
-                aria-label={selectedGoalId ? copy.backToGoals : copy.openSettings}
+                aria-label={selectedGoalId || view === 'admin' ? copy.backToGoals : copy.openSettings}
                 onClick={() => {
+                  if (view === 'admin') {
+                    setView('goals')
+                    return
+                  }
                   if (selectedGoalId) {
                     leaveGoalView()
                     return
@@ -1651,7 +1762,7 @@ function App() {
                   setSettingsOpen(true)
                 }}
               >
-                {selectedGoalId ? (
+                {selectedGoalId || view === 'admin' ? (
                   <BackIcon />
                 ) : (
                   <>
@@ -1777,11 +1888,25 @@ function App() {
                   }}
                 />
               )}
+
+              {view === 'admin' && currentUser.role === 'admin' && (
+                <AdminScreen
+                  users={adminUsers}
+                  currentUserId={currentUser.id}
+                  isLoading={adminLoading}
+                  revokingUserId={revokingUserId}
+                  error={adminError}
+                  copy={copy}
+                  language={settings.language}
+                  onRefresh={() => void loadAdminUsers()}
+                  onRevokeSessions={(user) => void revokeAdminUserSessions(user)}
+                />
+              )}
             </>
           )}
         </div>
 
-        {currentUser?.emailVerified && <nav className="bottom-nav" aria-label={copy.mainNavigation}>
+        {currentUser?.emailVerified && view !== 'admin' && <nav className="bottom-nav" aria-label={copy.mainNavigation}>
           <button
             className={view === 'goals' ? 'is-active' : ''}
             type="button"
@@ -1856,6 +1981,7 @@ function App() {
           onExport={(format) => void exportAccount(format)}
           onToggleNotifications={toggleNotifications}
           onOpenLegal={openLegalDocument}
+          onOpenAdmin={openAdminPanel}
         />
 
         {legalDocument && (

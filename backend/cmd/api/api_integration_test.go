@@ -73,6 +73,7 @@ func TestAPIProtectedRoutesRequireAuthentication(t *testing.T) {
 		{http.MethodPost, "/push/subscriptions", `{}`},
 		{http.MethodDelete, "/push/subscriptions", `{}`},
 		{http.MethodGet, "/stats", ""},
+		{http.MethodGet, "/admin/users", ""},
 	}
 
 	for _, test := range tests {
@@ -83,6 +84,60 @@ func TestAPIProtectedRoutesRequireAuthentication(t *testing.T) {
 			}
 			assertAPIError(t, response, "authorization token is required")
 		})
+	}
+}
+
+func TestAPIAdminAccessAndSessionRevocation(t *testing.T) {
+	setupTestDatabase(t)
+	router := newRouter()
+	memberCookie := registerAPIUser(t, router, "member@example.com")
+
+	forbidden := apiRequest(t, router, http.MethodGet, "/admin/users", "", memberCookie)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("member admin status = %d, body = %s", forbidden.Code, forbidden.Body.String())
+	}
+	assertAPIError(t, forbidden, "administrator access is required")
+
+	if _, err := db.Exec(`UPDATE users SET role = 'admin' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	adminToken, err := createAuthSession(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminCookie := &http.Cookie{Name: authCookieName, Value: adminToken}
+
+	list := apiRequest(t, router, http.MethodGet, "/admin/users", "", adminCookie)
+	if list.Code != http.StatusOK {
+		t.Fatalf("admin list status = %d, body = %s", list.Code, list.Body.String())
+	}
+	var users []AdminUserSummary
+	decodeResponse(t, list, &users)
+	if len(users) != 2 {
+		t.Fatalf("admin users = %+v", users)
+	}
+	if strings.Contains(list.Body.String(), "password") {
+		t.Fatalf("admin response exposed password data: %s", list.Body.String())
+	}
+
+	revoke := apiRequest(t, router, http.MethodDelete, "/admin/users/2/sessions", "", adminCookie)
+	if revoke.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d, body = %s", revoke.Code, revoke.Body.String())
+	}
+	var revoked RevokeSessionsResponse
+	decodeResponse(t, revoke, &revoked)
+	if revoked.RevokedSessions < 1 {
+		t.Fatalf("revoked sessions = %d", revoked.RevokedSessions)
+	}
+
+	memberMe := apiRequest(t, router, http.MethodGet, "/me", "", memberCookie)
+	if memberMe.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked member status = %d, body = %s", memberMe.Code, memberMe.Body.String())
+	}
+
+	selfRevoke := apiRequest(t, router, http.MethodDelete, "/admin/users/1/sessions", "", adminCookie)
+	if selfRevoke.Code != http.StatusBadRequest {
+		t.Fatalf("self revoke status = %d, body = %s", selfRevoke.Code, selfRevoke.Body.String())
 	}
 }
 
